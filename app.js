@@ -70,7 +70,7 @@
       fpa: { '11_1': {}, '11_2': {} },
       seminar: {},
       zweiteFS: { modus: 'keine' },
-      streichModus: { fachabi: 'auto', abitur: 'auto' }, // 'auto' | 'manuell'
+      streichModus: { fachabi: 'aus', abitur: 'aus' }, // 'aus' (Standard, nichts gestrichen) | 'ein'
       gestrichen: { fachabi: {}, abitur: {} }, // eigene Auswahl: { fachId: hj }
       behalten: { fachabi: {}, abitur: {} }, // zurückgeholte Fächer: { fachId: true }
       einstellungen: { zeigeNote: true, theme: 'auto', gewichte: { ...STANDARD_GEWICHTE } },
@@ -81,25 +81,11 @@
 
   // Alte Felder fach.streichen/streichenAbi ('auto'/'ja'/'nein') bleiben liegen, werden aber nicht mehr benutzt.
   const ARTEN = ['fachabi', 'abitur'];
-  const modusAus = (m) => (m === 'manuell' ? 'manuell' : 'auto');
-  function auswahlAus(g) {
-    const res = {};
-    if (g && typeof g === 'object' && !Array.isArray(g)) for (const [id, hj] of Object.entries(g)) if (typeof hj === 'string') res[id] = hj;
-    return res;
-  }
-  function behaltenAus(g) {
-    const res = {};
-    if (g && typeof g === 'object' && !Array.isArray(g)) for (const [id, v] of Object.entries(g)) if (v === true) res[id] = true;
-    return res;
-  }
 
-  // Alte Stände und Sicherungen ohne streichModus/gestrichen: automatisch, keine eigene Auswahl.
+  // Alte Stände und Sicherungen: 'auto' => 'aus', 'manuell' => 'ein' (Auswahl bleibt), fehlt => 'aus'.
   function normalisieren(d) {
     const n = neuerState();
     const e = d.einstellungen || {};
-    const sm = d.streichModus || {};
-    const gs = d.gestrichen || {};
-    const bh = d.behalten || {};
     const res = {
       ...n,
       ...d,
@@ -107,9 +93,7 @@
       fpa: { '11_1': {}, '11_2': {}, ...(d.fpa || {}) },
       seminar: d.seminar || {},
       zweiteFS: d.zweiteFS || { modus: 'keine' },
-      streichModus: Object.fromEntries(ARTEN.map((a) => [a, modusAus(sm[a])])),
-      gestrichen: Object.fromEntries(ARTEN.map((a) => [a, auswahlAus(gs[a])])),
-      behalten: Object.fromEntries(ARTEN.map((a) => [a, behaltenAus(bh[a])])),
+      ...Calc.streichDatenNormalisieren(d),
       einstellungen: { ...n.einstellungen, ...e, gewichte: { ...STANDARD_GEWICHTE, ...(e.gewichte || {}) } },
     };
     if (!d.klasse && d.aktivesHJ) res.klasse = d.aktivesHJ.slice(0, 2);
@@ -227,7 +211,7 @@
         <button class="kachel${abs.S === null ? '' : ' flaeche'}" style="${hStyle(punkteAusSchnitt(abs.S))}" data-action="tab" data-tab="abschluss" data-art="${art}">
           <div class="kachel-label">${abschlussName(art)}-Schnitt</div>
           <div class="kachel-wert">${fmtS(abs.S)}</div>
-          <div class="kachel-sub">${abs.vollstaendig ? 'Endergebnis' : abs.M ? 'Hochrechnung' : 'Noch keine Daten'}</div>
+          <div class="kachel-sub">${abs.vollstaendig ? (abs.vorlaeufig ? 'Vorläufig, ohne Streichen' : 'Endergebnis') : abs.M ? (abs.vorlaeufig ? 'Hochrechnung, ohne Streichen' : 'Hochrechnung') : 'Noch keine Daten'}</div>
         </button>
       </section>
       <section class="liste">
@@ -350,7 +334,8 @@
     const emin = Calc.benoetigteSumme(ziel, a.Mgesamt);
     let zielText;
     if (a.vollstaendig) {
-      zielText = a.E >= emin ? `Geschafft: ${fmtS(ziel)} ist erreicht.` : `${fmtS(ziel)} wurde verfehlt: Dir fehlen ${emin - a.E} Punkte.`;
+      const vorl = a.vorlaeufig ? 'Vorläufig: ' : '';
+      zielText = a.E >= emin ? `${vorl || 'Geschafft: '}${fmtS(ziel)} ist erreicht.` : `${vorl}${fmtS(ziel)} wurde verfehlt: Dir fehlen ${fmt(emin - a.E, 1)} Punkte.`;
     } else {
       const fehlt = emin - a.E;
       if (fehlt <= 0) zielText = `Mit dem bisherigen Stand ist ${fmtS(ziel)} schon sicher.`;
@@ -427,7 +412,8 @@
     }
 
     const slotsVon = abi ? Calc.einbringbareHalbjahreAbitur : Calc.einbringbareHalbjahre;
-    const manuell = a.streichModus === 'manuell';
+    const manuell = a.streichModus === 'ein';
+    const ohne = a.streichModus === 'aus';
     const N = a.zuStreichen;
     const fsFachId = abi && state.zweiteFS && state.zweiteFS.modus === 'jgst13' ? state.zweiteFS.fachId : null;
     let autoErgaenzt = 0;
@@ -440,15 +426,15 @@
         const gestr = !!(k && k.gestrichen);
         const istAuto = manuell && gestr && k.wahl === 'auto';
         if (istAuto) autoErgaenzt++;
-        const cls = gestr ? `gestrichen${istAuto ? ' auto' : ''}` : !k ? 'offen' : k.k ? 'offen k-offen' : 'farbig';
+        const cls = gestr ? `gestrichen${istAuto ? ' auto' : ''}` : !k ? 'offen' : k.k ? (ohne ? 'offen k-neutral' : 'offen k-offen') : 'farbig';
         const style = k && !gestr && !k.k ? hStyle(k.punkte) : '';
         const inhalt = `<small>${Calc.HJ_LABEL[hj]}</small>${k && k.k ? 'k' : wert === null ? '–' : wert}`;
         const label = `${name(f.id)} ${Calc.HJ_LABEL[hj]}`;
-        let titel = `${Calc.HJ_LABEL[hj]}${k && k.k ? ' (keine Note)' : ''}${gestr ? (istAuto ? ' (automatisch gestrichen)' : ' (gestrichen)') : ''}`;
+        let titel = `${Calc.HJ_LABEL[hj]}${k && k.k ? (ohne ? ' (keine Note, zählt nicht mit)' : ' (keine Note)') : ''}${gestr ? (istAuto ? ' (Vorschlag der App)' : ' (gestrichen)') : ''}`;
         if (manuell && waehlbar.includes(hj)) {
           const gedrueckt = gestr && k.wahl === 'manuell';
           const aktion = gestr ? 'zurückholen' : 'streichen';
-          return `<button type="button" class="hj-chip tippbar ${cls}" style="${style}" data-action="streich-tipp" data-art="${art}" data-id="${esc(f.id)}" data-hj="${hj}" aria-pressed="${gedrueckt}" aria-label="${label} ${aktion}${istAuto ? ' (gerade automatisch gestrichen)' : ''}" title="${titel}: tippen zum ${gestr ? 'Zurückholen' : 'Streichen'}">${inhalt}</button>`;
+          return `<button type="button" class="hj-chip tippbar ${cls}" style="${style}" data-action="streich-tipp" data-art="${art}" data-id="${esc(f.id)}" data-hj="${hj}" aria-pressed="${gedrueckt}" aria-label="${label} ${aktion}${istAuto ? ' (Vorschlag der App)' : ''}" title="${titel}: tippen zum ${gestr ? 'Zurückholen' : 'Streichen'}">${inhalt}</button>`;
         }
         if (manuell) {
           if (k && k.k) titel = `${Calc.HJ_LABEL[hj]}: ohne Note (k), wird immer gestrichen`;
@@ -462,42 +448,47 @@
       return `<div class="einbring-zeile"><span class="pruef-name">${name(f.id)}${pruef ? ` <span class="tag">P ×${a.faktor}</span>` : ''}</span><span class="hj-chips">${chips}</span>${pill(ge ? ge.punkte : null)}</div>`;
     }).join('');
     const hjText = (id, hj) => `${name(id)} ${Calc.HJ_LABEL[hj]}`;
-    const tauschHtml = !manuell && a.tausch && a.tausch.length ? `
+    const tauschHtml = manuell && a.tausch && a.tausch.length ? `
         <div class="tipp">
           <b>Tipp für bessere Gesamtergebnisse:</b>
           <ul>${a.tausch.map((x) => `<li>Streiche ${hjText(x.fachId, x.hj)} statt ${hjText(x.stattFachId, x.stattHj)}: ${name(x.fachId)} steigt von ${x.gePunkteVorher} auf ${x.gePunkteNachher} Punkte (${esc(Calc.notenstufe(Calc.stufeAusPunkten(x.gePunkteNachher)))}). Das kostet ${x.punkteVerlust} ${x.punkteVerlust === 1 ? 'Punkt' : 'Punkte'}, der Schnitt bleibt gleich.</li>`).join('')}</ul>
-          <small>Umsetzen: „Automatisch streichen“ ausschalten und die Halbjahre antippen.</small>
+          <small>Umsetzen: Tipp das gestrichelte Halbjahr an, um es zurückzuholen, und dann das andere, um es zu streichen.</small>
         </div>` : '';
-    const gezaehlt = manuell ? a.festAnzahl : a.gestrichenAnzahl;
     const fehltNoch = Math.max(0, N - a.festAnzahl);
     let streichHinweis = '';
     if (manuell && fehltNoch > 0) {
-      streichHinweis = `<p class="streich-hinweis">Noch ${fehltNoch} selbst auswählen.${autoErgaenzt ? ' Bis dahin streicht die App die gestrichelten automatisch.' : ''}</p>`;
-    } else if (!manuell && gezaehlt < N && a.slotsOffen > 0) {
-      streichHinweis = '<p class="streich-hinweis">Die App streicht in einem Fach erst, wenn alle seine Halbjahre feststehen.</p>';
+      const spaeter = a.gestrichenAnzahl < N && a.slotsOffen > 0 ? ' Vorschläge gibt es in einem Fach erst, wenn alle seine Halbjahre feststehen.' : '';
+      streichHinweis = `<p class="streich-hinweis">Noch ${fehltNoch} selbst auswählen.${autoErgaenzt ? ' Bis dahin streicht die App die gestrichelten automatisch.' : ''}${spaeter}</p>`;
+    }
+    if (ohne && a.kAnzahl > 0) {
+      streichHinweis = '<p class="streich-hinweis">Halbjahre ohne Note (k) zählen nicht mit. Sie werden am Ende immer gestrichen.</p>';
     }
     const legende = manuell ? `
         <div class="streich-legende" aria-hidden="true">
           <span><span class="hj-chip gestrichen mini">8</span> von dir</span>
-          <span><span class="hj-chip gestrichen auto mini">8</span> automatisch</span>
+          <span><span class="hj-chip gestrichen auto mini">8</span> Vorschlag der App</span>
         </div>` : '';
+    const klasseEnde = abi ? '13.' : '12.';
+    const streichText = manuell
+      ? `Die App schlägt vor, welche Halbjahre wegfallen (gestrichelt). Tipp ein Halbjahr an, um es selbst zu streichen oder zurückzuholen. Pro Fach höchstens eins, insgesamt ${N}.`
+      : `Gestrichen wird erst am Ende der ${klasseEnde} Klasse. Bis dahin zählen alle Halbjahre mit. Schalte „Streichen“ ein, um zu sehen, welche Halbjahre wegfallen würden.`;
     const streichKopf = `
         <label class="toggle-zeile">
-          <span class="toggle-text"><b>Automatisch streichen</b><small>${manuell ? `Tipp ein Halbjahr an, um es zu streichen oder zurückzuholen. Pro Fach höchstens eins, insgesamt ${N}.` : 'Die App wählt die besten Halbjahre zum Streichen aus.'}</small></span>
-          <input type="checkbox" class="switch" role="switch" data-bind="streich-modus" data-art="${art}" ${manuell ? '' : 'checked'}>
+          <span class="toggle-text"><b>Streichen</b><small>${streichText}</small></span>
+          <input type="checkbox" class="switch" role="switch" data-bind="streich-modus" data-art="${art}" ${manuell ? 'checked' : ''}>
         </label>
-        <p class="streich-status">Gestrichen: <b>${gezaehlt} von ${N}</b></p>
+        ${manuell ? `<p class="streich-status">Gestrichen: <b>${a.festAnzahl} von ${N}</b></p>` : ''}
         ${streichHinweis}${legende}`;
     const zielOptionen = [1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 2.8, 3.0, 3.3, 3.5, 4.0];
 
     return `
       ${umschalter}
       <section class="card hero${a.S === null ? '' : ' flaeche'}" style="${hStyle(punkteAusSchnitt(a.S))}">
-        <div class="kachel-label">${a.vollstaendig ? `Dein ${abschlussName(art)}-Schnitt` : `Hochrechnung ${abschlussName(art)}-Schnitt`}</div>
+        <div class="kachel-label">${a.vollstaendig ? `${a.vorlaeufig ? 'Vorläufiger' : 'Dein'} ${abschlussName(art)}-Schnitt` : `Hochrechnung ${abschlussName(art)}-Schnitt`}</div>
         <div class="hero-wert">${fmtS(a.S)}</div>
-        <div class="hero-sub">${a.S !== null ? esc(Calc.notenstufe(a.S)) + ' · ' : ''}${a.E} von ${a.M} erfassten Punkten</div>
+        <div class="hero-sub">${a.S !== null ? esc(Calc.notenstufe(a.S)) + ' · ' : ''}${fmt(a.E, 1)} von ${fmt(a.M, 1)} erfassten Punkten${a.vorlaeufig ? ' · noch ohne Streichen' : ''}</div>
         <div class="balken" title="Datenstand"><div style="width:${anteil}%"></div></div>
-        <div class="hinweis">${a.vollstaendig ? 'Alle Leistungen sind erfasst.' : `Datenstand: ${a.M} von ${a.Mgesamt} möglichen Punkten erfasst (${anteil} %). Die Hochrechnung nimmt an, dass du so weitermachst wie bisher.`}</div>
+        <div class="hinweis">${a.vollstaendig ? 'Alle Leistungen sind erfasst.' : `Datenstand: ${fmt(a.M, 1)} von ${a.Mgesamt} möglichen Punkten erfasst (${anteil} %). Die Hochrechnung nimmt an, dass du so weitermachst wie bisher.`}${a.vorlaeufig ? ` Gestrichen ist noch nichts: Alle Halbjahre zählen mit, umgerechnet auf ${a.anzahlHj}.` : ''}</div>
       </section>
 
       ${a.warnungen.length ? `<section class="card warn-card"><ul>${a.warnungen.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></section>` : ''}
@@ -519,8 +510,8 @@
       ${extraKarten}
 
       <section class="card">
-        <h3>Einbringung <span class="zahl">${a.eingebrachtAnzahl}/${a.anzahlHj}</span></h3>
-        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2 (bei Fächern, die in der 11. enden, auch 11/1).'} Rechts steht das Gesamtergebnis des Fachs.</p>
+        <h3>Einbringung <span class="zahl">${ohne ? `alle ${a.eingebrachtAnzahl}` : `${a.eingebrachtAnzahl}/${a.anzahlHj}`}</span></h3>
+        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2 (bei Fächern, die in der 11. enden, auch 11/1).'}${ohne ? ` Solange nichts gestrichen ist, rechnet die App alle Halbjahre auf ${a.anzahlHj} um.` : ''} Rechts steht das Gesamtergebnis des Fachs.</p>
         ${streichKopf}
         ${einbringRows}
         ${abi ? '' : `<div class="einbring-zeile"><span class="pruef-name">Fachpraktische Ausbildung</span><span class="hj-chips"></span>${pill(a.fpaGesamt)}</div>`}
@@ -528,8 +519,9 @@
       </section>
 
       <section class="card">
-        <h3>Bestehen ${a.vollstaendig ? '' : '<span class="zahl">vorläufig</span>'}</h3>
-        <p class="status ${a.ergebnis === 'bestanden' ? 'ok' : a.ergebnis === 'nicht bestanden' ? 'nein' : ''}">${a.ergebnis === 'bestanden' ? 'BESTANDEN' : a.ergebnis === 'nicht bestanden' ? 'NICHT BESTANDEN' : 'Eingaben unvollständig'}</p>
+        <h3>Bestehen ${a.vollstaendig && !a.vorlaeufig ? '' : '<span class="zahl">vorläufig</span>'}</h3>
+        <p class="status ${{ bestanden: 'ok', 'vorläufig bestanden': 'ok', 'nicht bestanden': 'nein', 'vorläufig nicht bestanden': 'nein' }[a.ergebnis] || ''}">${{ bestanden: 'BESTANDEN', 'nicht bestanden': 'NICHT BESTANDEN', 'vorläufig bestanden': 'Vorläufig: bestanden', 'vorläufig nicht bestanden': 'Vorläufig: nicht bestanden' }[a.ergebnis] || 'Eingaben unvollständig'}</p>
+        ${a.vorlaeufig && a.ergebnis !== 'unvollständig' ? '<p class="hinweis">Noch ohne Streichen gerechnet. Mit „Streichen“ siehst du das Ergebnis mit den Streichungen.</p>' : ''}
         ${a.hinweise.length && a.ergebnis === 'unvollständig' ? `<ul class="hinweis-liste">${a.hinweise.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}
         <ul class="check-liste">${a.bestehen.map((b) => `<li class="${b.ok ? 'ok' : 'nein'}">${b.ok ? '✓' : '✗'} ${esc(b.text)}</li>`).join('')}</ul>
         <p class="hinweis">Unter 4 Punkten zählt als Unterpunktung, 0 Punkte zählen doppelt (§ 35 Abs. 9).</p>
@@ -679,7 +671,8 @@
           <li><b>Halbjahresergebnis</b> (§ 21): Jede Schulaufgabe zählt so viel wie der gewichtete Schnitt aller kleinen Noten zusammen. Gerundet wird erst am Ende auf ganze Punkte, ab ,5 auf. Werte unter 1 ergeben 0 Punkte (§ 19 Abs. 6).</li>
           <li><b>Prüfung</b> (§ 35 Abs. 2): (2 × schriftlich + mündlich) / 3, gerundet; unter 1 ergibt 0. Ohne mündliche zählt die schriftliche. Fachabi: zählt dreifach, mündlich Englisch ist Pflicht. Abitur: zählt doppelt.</li>
           <li><b>Fachabitur</b> (§ 35 Abs. 5): 4 Prüfungen × 3, fachpraktische Ausbildung (2 Halbjahre) und 25 Halbjahre = 585 Punkte.</li>
-          <li><b>Streichen</b>: höchstens ein Halbjahr je Fach. „Automatisch streichen“ an: Die App wählt wie das Streichvorschlag-Tool der FOS, im Fach das schwächste Halbjahr. Zuerst Halbjahre ohne Note (k), dann Rettung eines Gesamtergebnisses unter 4 Punkten (wenn fürs Bestehen nötig), sonst die niedrigsten Punkte. Aus: Du tippst die Halbjahre selbst an. Was noch fehlt und jedes k-Halbjahr streicht die App automatisch dazu (gestrichelt).</li>
+          <li><b>Streichen</b>: Gestrichen wird erst am Ende der 12. (Abitur: 13.) Klasse. Deshalb ist „Streichen“ am Anfang aus. Dann zählen alle Halbjahre mit, auch 11/1 bei Fächern, die in der 11. enden. Damit der Schnitt vergleichbar bleibt, rechnet die App den Halbjahresteil auf 25 Halbjahre um (Abitur: 16): Summe der Halbjahrespunkte × 25 / Anzahl der Halbjahre. Halbjahre ohne Note (k) zählen dabei nicht mit. Das Ergebnis ist vorläufig.</li>
+          <li><b>„Streichen“ an</b>: höchstens ein Halbjahr je Fach. Die App schlägt vor, welche Halbjahre wegfallen (gestrichelt), wie das Streichvorschlag-Tool der FOS: im Fach das schwächste Halbjahr. Zuerst Halbjahre ohne Note (k), dann Rettung eines Gesamtergebnisses unter 4 Punkten (wenn fürs Bestehen nötig), sonst die niedrigsten Punkte. Du kannst Halbjahre selbst antippen, um sie zu streichen oder zurückzuholen.</li>
           <li><b>Gesamtergebnis</b> je Fach (für die Unterpunktungen): eingebrachte Halbjahre und Prüfung × 3, erst auf zwei Nachkommastellen, dann auf ganze Punkte gerundet. Die fpA-Gesamtnote zählt mit.</li>
           <li><b>Abitur</b> (§ 35 Abs. 7): 4 Prüfungen × 2, Seminar × 2 und 16 Halbjahre aus der 13. = 390 Punkte (mit 2. Fremdsprache 420).</li>
           <li>Höchstens ein Halbjahr pro Fach darf wegfallen. Sport zählt nicht.</li>
@@ -959,8 +952,7 @@
       toast('Note gelöscht');
     },
     'dialog-zu'() { dialogSchliessen(); },
-    // Manuell streichen: Halbjahr antippen (Regeln prüft auch calc.js)
-    // Manuell streichen. Gestrichenes antippen = „soll zählen“, Ungestrichenes = streichen (Regeln in calc.js)
+    // „Streichen“ an: Gestrichenes antippen = „soll zählen“, Ungestrichenes = streichen (Regeln in calc.js)
     'streich-tipp'(btn) {
       const { art, id, hj } = btn.dataset;
       let r = null;
@@ -1070,7 +1062,7 @@
         break;
       case 'streich-modus': {
         const art = el.dataset.art;
-        aendern(() => { Calc.streichModusSetzen(state, art, el.checked ? 'auto' : 'manuell'); });
+        aendern(() => { Calc.streichModusSetzen(state, art, el.checked ? 'ein' : 'aus'); });
         break;
       }
       case 'pruef':

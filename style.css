@@ -208,14 +208,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .hj-chip.gestrichen { color: var(--muted); background: var(--card-2); text-decoration: line-through; opacity: 0.6; }
 .hj-chip.gestrichen.auto { border-style: dashed; border-color: var(--muted); }
 .hj-chip.mini { display: inline-grid; min-width: 28px; font-size: 0.8rem; }
-/* Manuell streichen: antippbare Chips */
+/* „Streichen“ an: antippbare Chips */
 button.hj-chip { font: inherit; font-weight: 700; font-size: 0.9rem; cursor: pointer; -webkit-tap-highlight-color: transparent; min-height: 36px; align-content: center; }
 .hj-chip.tippbar { border-color: var(--border); }
 .hj-chip.tippbar.gestrichen.auto { border-color: var(--muted); }
 .hj-chip.tippbar[aria-pressed="true"] { border-color: var(--accent); opacity: 0.75; }
 .hj-chip.tippbar:hover, .hj-chip.tippbar:focus-visible { border-color: var(--accent); opacity: 1; }
 .hj-chip.tippbar:active { transform: scale(0.95); }
-/* Schalter „Automatisch streichen“ */
+/* Schalter „Streichen“ */
 .toggle-zeile { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; margin: 6px 0 4px; border-radius: 12px; background: var(--card-2); cursor: pointer; }
 .toggle-text { display: grid; gap: 2px; min-width: 0; }
 .toggle-text small { color: var(--muted); font-size: 0.82rem; }
@@ -235,6 +235,8 @@ input.switch:checked::before { transform: translateX(20px); }
 .status.nein { color: var(--danger); }
 .hinweis-liste { margin: 0 0 10px; padding-left: 18px; color: var(--muted); font-size: 0.85rem; display: grid; gap: 2px; }
 .hj-chip.k-offen { color: var(--danger); }
+/* „Streichen“ aus: k-Halbjahr zählt nicht, neutral statt rot */
+.hj-chip.k-neutral { color: var(--muted); background: var(--card-2); border: 1.5px dashed var(--border); }
 .tipp { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); font-size: 0.85rem; }
 .tipp ul { margin: 4px 0; padding-left: 18px; display: grid; gap: 4px; }
 .tipp small { color: var(--muted); }
