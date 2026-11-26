@@ -416,7 +416,6 @@
     const ohne = a.streichModus === 'aus';
     const N = a.zuStreichen;
     const fsFachId = abi && state.zweiteFS && state.zweiteFS.modus === 'jgst13' ? state.zweiteFS.fachId : null;
-    let autoErgaenzt = 0;
     const einbringRows = state.faecher.filter((f) => slotsVon(f).length).map((f) => {
       const hatK = a.kandidaten.some((x) => x.fachId === f.id && x.k);
       const waehlbar = a.waehlbar[f.id] || [];
@@ -425,7 +424,6 @@
         const wert = k && k.punkte !== null ? k.punkte : null;
         const gestr = !!(k && k.gestrichen);
         const istAuto = manuell && gestr && k.wahl === 'auto';
-        if (istAuto) autoErgaenzt++;
         const cls = gestr ? `gestrichen${istAuto ? ' auto' : ''}` : !k ? 'offen' : k.k ? (ohne ? 'offen k-neutral' : 'offen k-offen') : 'farbig';
         const style = k && !gestr && !k.k ? hStyle(k.punkte) : '';
         const inhalt = `<small>${Calc.HJ_LABEL[hj]}</small>${k && k.k ? 'k' : wert === null ? '–' : wert}`;
@@ -454,11 +452,11 @@
           <ul>${a.tausch.map((x) => `<li>Streiche ${hjText(x.fachId, x.hj)} statt ${hjText(x.stattFachId, x.stattHj)}: ${name(x.fachId)} steigt von ${x.gePunkteVorher} auf ${x.gePunkteNachher} Punkte (${esc(Calc.notenstufe(Calc.stufeAusPunkten(x.gePunkteNachher)))}). Das kostet ${x.punkteVerlust} ${x.punkteVerlust === 1 ? 'Punkt' : 'Punkte'}, der Schnitt bleibt gleich.</li>`).join('')}</ul>
           <small>Umsetzen: Tipp das gestrichelte Halbjahr an, um es zurückzuholen, und dann das andere, um es zu streichen.</small>
         </div>` : '';
-    const fehltNoch = Math.max(0, N - a.festAnzahl);
     let streichHinweis = '';
-    if (manuell && fehltNoch > 0) {
-      const spaeter = a.gestrichenAnzahl < N && a.slotsOffen > 0 ? ' Vorschläge gibt es in einem Fach erst, wenn alle seine Halbjahre feststehen.' : '';
-      streichHinweis = `<p class="streich-hinweis">Noch ${fehltNoch} selbst auswählen.${autoErgaenzt ? ' Bis dahin streicht die App die gestrichelten automatisch.' : ''}${spaeter}</p>`;
+    if (manuell && !a.komplett && a.gestrichenAnzahl < N) {
+      streichHinweis = `<p class="streich-hinweis">Vorschläge gibt es, sobald alle Halbjahre eingetragen sind. Du kannst aber schon selbst Halbjahre antippen.</p>`;
+    } else if (manuell && a.streichZaehler.vorschlag > 0) {
+      streichHinweis = '<p class="streich-hinweis">Die gestrichelten schlägt die App vor. Tipp sie an, um sie zurückzuholen, oder tipp andere Halbjahre an.</p>';
     }
     if (ohne && a.kAnzahl > 0) {
       streichHinweis = '<p class="streich-hinweis">Halbjahre ohne Note (k) zählen nicht mit. Sie werden am Ende immer gestrichen.</p>';
@@ -470,14 +468,14 @@
         </div>` : '';
     const klasseEnde = abi ? '13.' : '12.';
     const streichText = manuell
-      ? `Die App schlägt vor, welche Halbjahre wegfallen (gestrichelt). Tipp ein Halbjahr an, um es selbst zu streichen oder zurückzuholen. Pro Fach höchstens eins, insgesamt ${N}.`
+      ? `Sind alle Halbjahre eingetragen, schlägt die App vor, welche wegfallen (gestrichelt). Tipp ein Halbjahr an, um es selbst zu streichen oder zurückzuholen. Pro Fach höchstens eins, insgesamt ${N}.`
       : `Gestrichen wird erst am Ende der ${klasseEnde} Klasse. Bis dahin zählen alle Halbjahre mit. Schalte „Streichen“ ein, um zu sehen, welche Halbjahre wegfallen würden.`;
     const streichKopf = `
         <label class="toggle-zeile">
           <span class="toggle-text"><b>Streichen</b><small>${streichText}</small></span>
           <input type="checkbox" class="switch" role="switch" data-bind="streich-modus" data-art="${art}" ${manuell ? 'checked' : ''}>
         </label>
-        ${manuell ? `<p class="streich-status">Gestrichen: <b>${a.festAnzahl} von ${N}</b></p>` : ''}
+        ${manuell ? `<p class="streich-status">Gestrichen: <b>${a.gestrichenAnzahl} von ${N}</b>${a.streichZaehler.gesamt ? ` ${esc(Calc.streichAufschluesselung(a))}` : ''}</p>` : ''}
         ${streichHinweis}${legende}`;
     const zielOptionen = [1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 2.8, 3.0, 3.3, 3.5, 4.0];
 
@@ -511,7 +509,7 @@
 
       <section class="card">
         <h3>Einbringung <span class="zahl">${ohne ? `alle ${a.eingebrachtAnzahl}` : `${a.eingebrachtAnzahl}/${a.anzahlHj}`}</span></h3>
-        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2 (bei Fächern, die in der 11. enden, auch 11/1).'}${ohne ? ` Solange nichts gestrichen ist, rechnet die App alle Halbjahre auf ${a.anzahlHj} um.` : ''} Rechts steht das Gesamtergebnis des Fachs.</p>
+        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2 (bei Fächern, die in der 11. enden, auch 11/1).'}${ohne ? ` Solange nichts gestrichen ist, rechnet die App alle Halbjahre auf ${a.anzahlHj} um.` : a.umgerechnet ? ` Bis ${N} Halbjahre gestrichen sind, rechnet die App die übrigen auf ${a.anzahlHj} um.` : ''} Rechts steht das Gesamtergebnis des Fachs.</p>
         ${streichKopf}
         ${einbringRows}
         ${abi ? '' : `<div class="einbring-zeile"><span class="pruef-name">Fachpraktische Ausbildung</span><span class="hj-chips"></span>${pill(a.fpaGesamt)}</div>`}
@@ -672,7 +670,7 @@
           <li><b>Prüfung</b> (§ 35 Abs. 2): (2 × schriftlich + mündlich) / 3, gerundet; unter 1 ergibt 0. Ohne mündliche zählt die schriftliche. Fachabi: zählt dreifach, mündlich Englisch ist Pflicht. Abitur: zählt doppelt.</li>
           <li><b>Fachabitur</b> (§ 35 Abs. 5): 4 Prüfungen × 3, fachpraktische Ausbildung (2 Halbjahre) und 25 Halbjahre = 585 Punkte.</li>
           <li><b>Streichen</b>: Gestrichen wird erst am Ende der 12. (Abitur: 13.) Klasse. Deshalb ist „Streichen“ am Anfang aus. Dann zählen alle Halbjahre mit, auch 11/1 bei Fächern, die in der 11. enden. Damit der Schnitt vergleichbar bleibt, rechnet die App den Halbjahresteil auf 25 Halbjahre um (Abitur: 16): Summe der Halbjahrespunkte × 25 / Anzahl der Halbjahre. Halbjahre ohne Note (k) zählen dabei nicht mit. Das Ergebnis ist vorläufig.</li>
-          <li><b>„Streichen“ an</b>: höchstens ein Halbjahr je Fach. Die App schlägt vor, welche Halbjahre wegfallen (gestrichelt), wie das Streichvorschlag-Tool der FOS: im Fach das schwächste Halbjahr. Zuerst Halbjahre ohne Note (k), dann Rettung eines Gesamtergebnisses unter 4 Punkten (wenn fürs Bestehen nötig), sonst die niedrigsten Punkte. Du kannst Halbjahre selbst antippen, um sie zu streichen oder zurückzuholen.</li>
+          <li><b>„Streichen“ an</b>: höchstens ein Halbjahr je Fach. Sind alle Halbjahre eingetragen, schlägt die App vor, welche Halbjahre wegfallen (gestrichelt), wie das Streichvorschlag-Tool der FOS: im Fach das schwächste Halbjahr. Zuerst Halbjahre ohne Note (k), dann Rettung eines Gesamtergebnisses unter 4 Punkten (wenn fürs Bestehen nötig), sonst die niedrigsten Punkte. Du kannst Halbjahre selbst antippen, um sie zu streichen oder zurückzuholen, auch schon vorher. Bis dahin streicht die App nur k-Halbjahre und deine Wahl und rechnet die übrigen Halbjahre wie oben um.</li>
           <li><b>Gesamtergebnis</b> je Fach (für die Unterpunktungen): eingebrachte Halbjahre und Prüfung × 3, erst auf zwei Nachkommastellen, dann auf ganze Punkte gerundet. Die fpA-Gesamtnote zählt mit.</li>
           <li><b>Abitur</b> (§ 35 Abs. 7): 4 Prüfungen × 2, Seminar × 2 und 16 Halbjahre aus der 13. = 390 Punkte (mit 2. Fremdsprache 420).</li>
           <li>Höchstens ein Halbjahr pro Fach darf wegfallen. Sport zählt nicht.</li>

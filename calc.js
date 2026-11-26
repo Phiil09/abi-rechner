@@ -51,6 +51,10 @@
  *    höchstens N). k-Halbjahre kommen immer dazu. Fehlen noch Streichungen, ergänzt die
  *    automatische Regel oben sie in den übrigen Fächern (Kennzeichen wahl: 'auto'). Ohne eigene
  *    Wahl ist das genau der automatische Streichvorschlag.
+ *    Vorschläge gibt es nur im vollständigen Stand (jedes einbringbare Halbjahr hat einen Wert
+ *    oder k). Im Teilstand streicht die App nur k und die eigene Wahl. Sind das weniger als N,
+ *    wird der Halbjahresteil wie bei 'aus' umgerechnet: × slots / Z, Z = alle nicht gestrichenen
+ *    Halbjahre. Ohne eigene Wahl ist das genau das Ergebnis von 'aus'.
  *    state.behalten[art] = { fachId: true }: Fächer, die der Nutzer zurückgeholt hat. Die Ergänzung
  *    nimmt sie nur, wenn kein anderes Fach übrig ist (mit Warnung).
  *  - Alte Werte: 'auto' => 'aus', 'manuell' => 'ein'. Die alten Felder fach.streichen/streichenAbi
@@ -355,7 +359,8 @@ const Calc = (function () {
    * Einbringung und Streichvorschlag (in Anlehnung an das Streichvorschlag-Tool der FOS).
    * Gestrichen werden (slots - anzahl) Halbjahre, höchstens eins je Fach.
    * Kandidat je Fach: niedrigste HJL, bei Gleichstand das frühere Halbjahr; "k" immer zuerst.
-   * Im Teilstand nur Fächer, deren einbringbare Halbjahre alle feststehen (k-Halbjahre immer).
+   * Im Teilstand (ein einbringbares Halbjahr ohne Wert und ohne k) gibt es keine Vorschläge,
+ * nur k-Halbjahre werden gestrichen (und im manuellen Modus die eigene Wahl).
    * Priorität: k > Rettung vor Unterpunktung > automatisch (niedrigste Punkte)
    *   > Streichung, die eine Unterpunktung erzeugt/verschlimmert.
    * Rettungen und der Schutz vor neuen Unterpunktungen kosten unter Umständen Punkte. Wie das Tool
@@ -450,6 +455,7 @@ const Calc = (function () {
       }
     }
     const slotsOffen = proFach.reduce((s, p) => s + p.offen.length, 0);
+    const komplett = slotsOffen === 0;
     const rest = ohne ? 0 : Math.max(0, zuStreichen - fest.length);
 
     // Eine Option je Fach (nur Fächer ohne feste Streichung)
@@ -461,7 +467,7 @@ const Calc = (function () {
       let kand = moeglich[0];
       const schluessel = (k) => (k.k ? -1 : k.punkte);
       for (const k of moeglich) if (schluessel(k) < schluessel(kand)) kand = k;
-      if (p.offen.length && !kand.k) continue;
+      if (!komplett && !kand.k) continue; // Teilstand: keine Vorschläge, nur k
       const ohne = gesamtergebnis(p.eigene.map((k) => k.punkte), p.ap, faktor);
       const mit = gesamtergebnis(p.eigene.filter((k) => k !== kand).map((k) => k.punkte), p.ap, faktor);
       optionen.push({
@@ -524,7 +530,7 @@ const Calc = (function () {
     // Ist der Stand nicht bestanden, gibt es keinen Vorschlag (er würde nur Punkte kosten).
     const tausch = [];
     const nurVorschlag = !manuell || (manuellAnzahl === 0 && !Object.keys(behalten).length);
-    if (!ohne && nurVorschlag && slotsOffen === 0 && ctx.schnitt && beste && beste.w.besteht) {
+    if (!ohne && nurVorschlag && komplett && ctx.schnitt && beste && beste.w.besteht) {
       let aktuell = gewaehlt.slice();
       let aktW = beste.w;
       const sStart = ctx.schnitt(aktW.E);
@@ -565,7 +571,7 @@ const Calc = (function () {
     }
 
     return {
-      kandidaten, slotsGesamt, slotsOffen, zuStreichen, faecherMitSlots: proFach.length, kAnzahl, kOffen, hinweise, tausch,
+      kandidaten, slotsGesamt, slotsOffen, komplett, zuStreichen, faecherMitSlots: proFach.length, kAnzahl, kOffen, hinweise, tausch,
       modus: ohne ? 'aus' : manuell ? 'ein' : 'auto', waehlbar, festAnzahl: fest.length, manuellAnzahl,
     };
   }
@@ -671,12 +677,16 @@ const Calc = (function () {
     // Modus 'aus': k-Halbjahre zählen nicht (auch nicht als 0), alle anderen zählen mit.
     const eingebracht = ein.kandidaten.filter((k) => !k.gestrichen && !(aus && k.k));
     const eHjl = eingebracht.reduce((s, k) => s + k.punkte, 0);
+    const gestrichenAnzahl = ein.kandidaten.filter((k) => k.gestrichen).length;
+    // 'ein' im Teilstand mit weniger als N Streichungen: wie 'aus' über die nicht gestrichenen Halbjahre umrechnen
+    const teilUmgerechnet = !aus && !ein.komplett && gestrichenAnzahl < ein.zuStreichen;
     let E;
     let zaehlbarHj = null;
-    if (aus) {
-      // Halbjahresteil auf anzahlHj (25 bzw. 16) umrechnen: × anzahlHj / Z, Z = alle zählbaren Halbjahre.
-      // Im Teilstand gilt dasselbe Gewicht für erfasste und noch offene Halbjahre. Keine Zwischenrundung.
-      zaehlbarHj = ein.slotsGesamt - ein.kAnzahl;
+    if (aus || teilUmgerechnet) {
+      // Halbjahresteil auf anzahlHj (25 bzw. 16) umrechnen: × anzahlHj / Z, Z = alle zählbaren Halbjahre
+      // ('aus': ohne k; 'ein': ohne die gestrichenen). Im Teilstand gilt dasselbe Gewicht für erfasste
+      // und noch offene Halbjahre. Keine Zwischenrundung.
+      zaehlbarHj = ein.slotsGesamt - (aus ? ein.kAnzahl : gestrichenAnzahl);
       const skal = (x) => (zaehlbarHj > 0 ? (x * anzahlHj) / zaehlbarHj : 0);
       E = Erest + skal(eHjl);
       M += skal(eingebracht.length * 15);
@@ -748,6 +758,8 @@ const Calc = (function () {
       ergebnis,
       vorlaeufig: aus,
       zaehlbarHj,
+      umgerechnet: aus || teilUmgerechnet,
+      komplett: ein.komplett,
       restMax,
       kandidaten: ein.kandidaten,
       eingebrachtAnzahl: eingebracht.length,
@@ -760,7 +772,14 @@ const Calc = (function () {
       tausch: ein.tausch,
       streichModus: modus,
       waehlbar: ein.waehlbar,
-      gestrichenAnzahl: ein.kandidaten.filter((k) => k.gestrichen).length,
+      gestrichenAnzahl,
+      // Alle Streichungen nach Herkunft: eigene Wahl, k-Halbjahre, Vorschläge der App
+      streichZaehler: {
+        gesamt: gestrichenAnzahl,
+        vonDir: ein.kandidaten.filter((k) => k.gestrichen && k.wahl === 'manuell').length,
+        k: ein.kandidaten.filter((k) => k.gestrichen && k.k).length,
+        vorschlag: ein.kandidaten.filter((k) => k.gestrichen && k.wahl === 'auto' && !k.k).length,
+      },
       festAnzahl: ein.festAnzahl,
       manuellAnzahl: ein.manuellAnzahl,
       faktor,
@@ -775,6 +794,20 @@ const Calc = (function () {
       hinweise,
       warnungen,
     };
+  }
+
+  /**
+   * Aufschlüsselung für „Gestrichen: X von N“, z. B. "(2 von dir, 3 Vorschläge der App)".
+   * Leer, wenn nichts gestrichen ist.
+   */
+  function streichAufschluesselung(a) {
+    const z = a && a.streichZaehler;
+    if (!z || !z.gesamt) return '';
+    const teile = [];
+    if (z.vonDir) teile.push(`${z.vonDir} von dir`);
+    if (z.k) teile.push(`${z.k} ${z.k === 1 ? 'k-Halbjahr' : 'k-Halbjahre'}`);
+    if (z.vorschlag) teile.push(`${z.vorschlag} ${z.vorschlag === 1 ? 'Vorschlag' : 'Vorschläge'} der App`);
+    return `(${teile.join(', ')})`;
   }
 
   /** Gespeicherten Modus lesen. Alt: 'manuell' => 'ein', 'auto' => 'aus'; fehlt er, gilt 'aus'. */
@@ -869,7 +902,8 @@ const Calc = (function () {
   /**
    * Modus setzen (ändert state): 'ein' oder 'aus'. Eigene Auswahl und zurückgeholte Fächer bleiben
    * in beiden Richtungen gespeichert (im Modus 'aus' wird trotzdem nichts gestrichen). Einträge
-   * gelöschter Fächer fallen weg. Ohne eigene Auswahl zeigt 'ein' den automatischen Vorschlag.
+   * gelöschter Fächer fallen weg. Ohne eigene Auswahl zeigt 'ein' den automatischen Vorschlag
+   * (sobald alle Halbjahre eingetragen sind).
    */
   function streichModusSetzen(state, art, modus) {
     streichFelder(state, art);
@@ -903,7 +937,7 @@ const Calc = (function () {
     halbjahr, halbjahreDesFachs, einbringbareHalbjahre, einbringbareHalbjahreAbitur,
     pruefungsergebnis, fpaHalbjahr, seminarErgebnis,
     auswertung, fachabitur, abitur, benoetigteSumme, naechsteNoteFuer,
-    streichModusVon, streichModusNormalisieren, streichDatenNormalisieren, autoAuswahl, auswahlListe, streichTippen, streichModusSetzen,
+    streichModusVon, streichModusNormalisieren, streichDatenNormalisieren, autoAuswahl, auswahlListe, streichTippen, streichModusSetzen, streichAufschluesselung,
   };
 })();
 
