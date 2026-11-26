@@ -31,10 +31,18 @@
  *  - Gesamtergebnis je Fach (nur für die Unterpunktungen): erst auf 2 Nachkommastellen,
  *    dann auf ganze Punkte gerundet (siehe gesamtergebnisRunden). fpA-Gesamtnote zählt mit.
  *  - Streichen: höchstens 1 HJL je Fach, Kandidat ist die niedrigste HJL (früheres HJ bei
- *    Gleichstand). Reihenfolge: k-Halbjahre, vom Nutzer erzwungene ("ja"), Rettung eines
- *    Gesamtergebnisses vor der Unterpunktung, sonst die niedrigsten Punkte. "nein" und
- *    Streichungen, die eine Unterpunktung erzeugen, kommen nur zum Zug, wenn es nötig ist.
+ *    Gleichstand). Reihenfolge: k-Halbjahre, Rettung eines Gesamtergebnisses vor der
+ *    Unterpunktung, sonst die niedrigsten Punkte. Streichungen, die eine Unterpunktung
+ *    erzeugen, kommen nur zum Zug, wenn es nötig ist.
  *  - "k" (keine Note möglich) muss gestrichen werden; mehr k als Streichungen => nicht bestanden.
+ *
+ * Streichmodus (state.streichModus[art]: 'auto' | 'manuell', state.gestrichen[art]: { fachId: hj }):
+ *  - 'auto': die Regeln oben. Die alten Felder fach.streichen/streichenAbi werden ignoriert.
+ *  - 'manuell': gestrichen wird, was der Nutzer gewählt hat (je Fach höchstens eins, insgesamt
+ *    höchstens N). k-Halbjahre kommen immer dazu. Fehlen noch Streichungen, ergänzt die
+ *    automatische Regel sie in den übrigen Fächern (Kennzeichen wahl: 'auto').
+ *    state.behalten[art] = { fachId: true }: Fächer, die der Nutzer zurückgeholt hat. Die Ergänzung
+ *    nimmt sie nur, wenn kein anderes Fach übrig ist (mit Warnung).
  */
 const Calc = (function () {
   const HJ = ['11_1', '11_2', '12_1', '12_2', '13_1', '13_2'];
@@ -253,62 +261,138 @@ const Calc = (function () {
   /** Unterpunktungs-Gewicht: 0 Punkte zählen doppelt, 1–3 einfach. */
   const unterpunktung = (p) => (p === null || p === undefined ? 0 : p === 0 ? 2 : p < 4 ? 1 : 0);
   const zaehleUnter4 = (werte) => werte.reduce((s, p) => s + unterpunktung(p), 0);
-  const streichWahl = (f, feld) => (f[feld] === 'ja' || f[feld] === 'nein' ? f[feld] : 'auto');
+
+  /**
+   * Gespeicherte Auswahl in eine Liste [{ fachId, hj }] umwandeln.
+   * Erlaubt { fachId: hj }, { fachId: [hj, …] } (alte/kaputte Daten) und [{ fachId, hj }, …].
+   */
+  function auswahlListe(g) {
+    const res = [];
+    if (!g || typeof g !== 'object') return res;
+    if (Array.isArray(g)) {
+      for (const w of g) if (w && w.fachId !== undefined && w.fachId !== null && typeof w.hj === 'string') res.push({ fachId: String(w.fachId), hj: w.hj });
+      return res;
+    }
+    for (const [fachId, wert] of Object.entries(g)) {
+      for (const hj of [].concat(wert)) if (typeof hj === 'string') res.push({ fachId, hj });
+    }
+    return res;
+  }
 
   /**
    * Einbringung und Streichvorschlag (in Anlehnung an das Streichvorschlag-Tool der FOS).
    * Gestrichen werden (slots - anzahl) Halbjahre, höchstens eins je Fach.
    * Kandidat je Fach: niedrigste HJL, bei Gleichstand das frühere Halbjahr; "k" immer zuerst.
    * Im Teilstand nur Fächer, deren einbringbare Halbjahre alle feststehen (k-Halbjahre immer).
-   * Priorität: k > "ja" > Rettung vor Unterpunktung > automatisch (niedrigste Punkte)
-   *   > Streichung, die eine Unterpunktung erzeugt/verschlimmert > "nein".
+   * Priorität: k > Rettung vor Unterpunktung > automatisch (niedrigste Punkte)
+   *   > Streichung, die eine Unterpunktung erzeugt/verschlimmert.
    * Rettungen und der Schutz vor neuen Unterpunktungen kosten unter Umständen Punkte. Wie das Tool
    * setzen wir sie nur so weit ein, wie es fürs Bestehen nötig ist: Von allen Varianten gewinnt die,
    * die besteht und die meisten Punkte bringt.
-   * ctx: { pflicht(f, hj), faktor, apVon(f), streichFeld, bewerten(eHjl, geWerte) }
+   * Manueller Modus (ctx.manuell = [{ fachId, hj }]): k-Halbjahre und die gültige Auswahl stehen
+   * fest (auch in unvollständigen Fächern, auch noch offene Halbjahre). Die restlichen
+   * Streichungen ergänzt die automatische Regel in den übrigen Fächern.
+   * ctx: { pflicht(f, hj), faktor, apVon(f), bewerten(eHjl, geWerte), schnitt(E), manuell }
    */
   function einbringen(faecher, slotsVon, anzahl, ctx = {}) {
     const faktor = ctx.faktor || 3;
     const apVon = ctx.apVon || (() => null);
-    const feld = ctx.streichFeld || 'streichen';
     const bewerten = ctx.bewerten || ((eHjl) => ({ besteht: true, geUnter4: 0, E: eHjl }));
+    const pflicht = (f, hj) => !!(ctx.pflicht && ctx.pflicht(f, hj));
+    const manuell = Array.isArray(ctx.manuell) ? ctx.manuell : null;
+    // "behalten" (nur manuell): Fächer, die zählen sollen; die automatische Ergänzung nimmt sie nur, wenn nichts anderes übrig ist
+    const behalten = manuell && ctx.behalten ? ctx.behalten : {};
+    const istBehalten = (p) => behalten[p.f.id] === true;
     let slotsGesamt = 0;
-    let slotsOffen = 0;
     const kandidaten = [];
     const proFach = [];
     faecher.forEach((f, index) => {
       const slots = slotsVon(f);
       if (!slots.length) return;
       const eigene = [];
-      let komplett = true;
+      const offen = [];
       for (const hj of slots) {
         slotsGesamt++;
         const r = halbjahr(f, hj);
-        if (!r.k && r.punkte === null) { slotsOffen++; komplett = false; continue; }
-        const k = { fachId: f.id, hj, punkte: r.k ? 0 : r.punkte, k: r.k, gestrichen: false, pflicht: !!(ctx.pflicht && ctx.pflicht(f, hj)) };
+        if (!r.k && r.punkte === null) { offen.push(hj); continue; }
+        const k = { fachId: f.id, hj, punkte: r.k ? 0 : r.punkte, k: r.k, gestrichen: false, pflicht: pflicht(f, hj) };
         kandidaten.push(k);
         eigene.push(k);
       }
-      proFach.push({ f, index, eigene, komplett, ap: apVon(f), wahl: streichWahl(f, feld) });
+      proFach.push({ f, index, slots, eigene, offen, ap: apVon(f), fest: null });
     });
     const zuStreichen = Math.max(0, slotsGesamt - anzahl);
+    const hinweise = [];
+    const name = (p) => p.f.name || 'Fach';
 
-    // Eine Option je Fach
+    // Wählbar (manueller Modus): einbringbare Halbjahre ohne Pflicht; Fächer mit k sind schon belegt.
+    const waehlbar = {};
+    for (const p of proFach) waehlbar[p.f.id] = p.eigene.some((k) => k.k) ? [] : p.slots.filter((hj) => !pflicht(p.f, hj));
+
+    // Feste Streichungen im manuellen Modus
+    const fest = [];
+    let manuellAnzahl = 0;
+    if (manuell) {
+      // 1. k-Halbjahre (eins je Fach, höchstens zuStreichen)
+      for (const p of proFach) {
+        const kk = p.eigene.find((k) => k.k && !k.pflicht);
+        if (kk && fest.length < zuStreichen) { fest.push(kk); p.fest = kk; }
+      }
+      // 2. Auswahl prüfen: gelöschte Fächer, nicht einbringbare/Pflicht-Halbjahre und zweite Wahl im Fach fallen weg
+      const gueltig = [];
+      for (const w of manuell) {
+        const p = proFach.find((x) => x.f.id === w.fachId);
+        if (!p || gueltig.some((g) => g.p === p)) continue;
+        if (p.eigene.some((k) => k.k)) {
+          if (p.slots.includes(w.hj) && !(p.eigene.find((k) => k.hj === w.hj) || {}).k) {
+            hinweise.push(`${name(p)} hat ein Halbjahr ohne Note (k). Das wird gestrichen, deine Auswahl in diesem Fach zählt deshalb nicht.`);
+          }
+          continue;
+        }
+        if (!waehlbar[p.f.id].includes(w.hj)) continue;
+        gueltig.push({ p, hj: w.hj });
+      }
+      gueltig.sort((a, b) => a.p.index - b.p.index);
+      const frei = Math.max(0, zuStreichen - fest.length);
+      if (gueltig.length > frei) {
+        hinweise.push(`Es sind ${gueltig.length} Halbjahre zum Streichen ausgewählt, möglich sind nur ${frei}. Es zählen die ersten ${frei} in der Reihenfolge deiner Fächer.`);
+        gueltig.length = frei;
+      }
+      for (const { p, hj } of gueltig) {
+        let kand = p.eigene.find((k) => k.hj === hj);
+        if (!kand) {
+          // Noch offenes Halbjahr: zählt nicht mehr als fehlend, weil es wegfällt
+          kand = { fachId: p.f.id, hj, punkte: null, k: false, offen: true, gestrichen: false, pflicht: false };
+          kandidaten.push(kand);
+          p.eigene.push(kand);
+          p.offen = p.offen.filter((h) => h !== hj);
+        }
+        kand.manuell = true;
+        fest.push(kand);
+        p.fest = kand;
+        manuellAnzahl++;
+      }
+    }
+    const slotsOffen = proFach.reduce((s, p) => s + p.offen.length, 0);
+    const rest = Math.max(0, zuStreichen - fest.length);
+
+    // Eine Option je Fach (nur Fächer ohne feste Streichung)
     const optionen = [];
     for (const p of proFach) {
+      if (p.fest) continue;
       const moeglich = p.eigene.filter((k) => !k.pflicht);
       if (!moeglich.length) continue;
       let kand = moeglich[0];
       const schluessel = (k) => (k.k ? -1 : k.punkte);
       for (const k of moeglich) if (schluessel(k) < schluessel(kand)) kand = k;
-      if (!p.komplett && !kand.k) continue;
+      if (p.offen.length && !kand.k) continue;
       const ohne = gesamtergebnis(p.eigene.map((k) => k.punkte), p.ap, faktor);
       const mit = gesamtergebnis(p.eigene.filter((k) => k !== kand).map((k) => k.punkte), p.ap, faktor);
       optionen.push({
         kand, p, ohne, mit,
         gewinn: (mit.roh ?? 0) - (ohne.roh ?? 0),
-        rettung: p.wahl === 'auto' && !kand.k && ohne.punkte !== null && ohne.punkte < 4 && mit.punkte !== null && mit.punkte >= 4,
-        gefahr: p.wahl === 'auto' && !kand.k && unterpunktung(mit.punkte) > unterpunktung(ohne.punkte),
+        rettung: !kand.k && ohne.punkte !== null && ohne.punkte < 4 && mit.punkte !== null && mit.punkte >= 4,
+        gefahr: !kand.k && unterpunktung(mit.punkte) > unterpunktung(ohne.punkte),
       });
     }
     const vergleich = (a, b) => a.kand.punkte - b.kand.punkte || b.gewinn - a.gewinn || (a.ohne.roh ?? 99) - (b.ohne.roh ?? 99) || a.p.index - b.p.index;
@@ -316,14 +400,14 @@ const Calc = (function () {
 
     function auswahl(anzahlRettungen, schutz) {
       const gerettet = new Set(rettungen.slice(0, anzahlRettungen));
-      const stufe = (o) => (o.kand.k ? 0 : o.p.wahl === 'ja' ? 1 : gerettet.has(o) ? 2 : o.p.wahl === 'nein' ? 5 : schutz && o.gefahr ? 4 : 3);
-      return optionen.slice().sort((a, b) => stufe(a) - stufe(b) || vergleich(a, b)).slice(0, zuStreichen);
+      const stufe = (o) => (o.kand.k ? 0 : istBehalten(o.p) ? 6 : gerettet.has(o) ? 2 : schutz && o.gefahr ? 4 : 3);
+      return optionen.slice().sort((a, b) => stufe(a) - stufe(b) || vergleich(a, b)).slice(0, rest);
     }
 
     function auswerten(gewaehlt) {
-      const weg = new Set(gewaehlt.map((o) => o.kand));
+      const weg = new Set(fest.concat(gewaehlt.map((o) => o.kand)));
       let eHjl = 0;
-      for (const k of kandidaten) if (!weg.has(k)) eHjl += k.punkte;
+      for (const k of kandidaten) if (!weg.has(k) && k.punkte !== null) eHjl += k.punkte;
       const ge = proFach.map((p) => gesamtergebnis(p.eigene.filter((k) => !weg.has(k)).map((k) => k.punkte), p.ap, faktor).punkte);
       return { ...bewerten(eHjl, ge), ge };
     }
@@ -343,33 +427,29 @@ const Calc = (function () {
       }
     }
     const gewaehlt = beste ? beste.gewaehlt : [];
-    for (const o of gewaehlt) o.kand.gestrichen = true;
+    for (const k of fest) { k.gestrichen = true; k.wahl = k.manuell ? 'manuell' : 'auto'; }
+    for (const o of gewaehlt) { o.kand.gestrichen = true; o.kand.wahl = 'auto'; }
+    for (const o of gewaehlt) {
+      if (istBehalten(o.p) && !o.kand.k) hinweise.push(`${name(o.p)} soll zählen, musste aber automatisch gestrichen werden, weil kein anderes Fach mehr übrig ist. Wähl selbst ein anderes Halbjahr zum Streichen.`);
+    }
 
-    const hinweise = [];
-    const name = (p) => p.f.name || 'Fach';
-    for (const o of optionen) {
-      if (o.p.wahl === 'nein' && o.kand.gestrichen) hinweise.push(`${name(o.p)} ist auf „nicht streichen“ gestellt, musste aber gestrichen werden, weil sonst zu wenige Halbjahre wegfallen.`);
-      if (o.p.wahl === 'ja' && !o.kand.gestrichen) hinweise.push(`${name(o.p)} soll gestrichen werden, aber es sind schon alle ${zuStreichen} Streichungen vergeben.`);
-    }
-    for (const p of proFach) {
-      if (p.wahl === 'ja' && !optionen.some((o) => o.p === p) && p.eigene.length) hinweise.push(`${name(p)} wird erst gestrichen, wenn alle Halbjahre des Fachs feststehen.`);
-    }
     const kAnzahl = kandidaten.filter((k) => k.k).length;
     const kOffen = kandidaten.filter((k) => k.k && !k.gestrichen).length;
 
-    // Gesamtergebnisoptimierter Vorschlag: Tausch einer Streichung, der ein Gesamtergebnis um
-    // eine Notenstufe verbessert, ohne den Schnitt zu senken oder das Bestehen zu gefährden.
+    // Gesamtergebnisoptimierter Vorschlag (nur im automatischen Modus): Tausch einer Streichung,
+    // der ein Gesamtergebnis um eine Notenstufe verbessert, ohne den Schnitt zu senken oder das
+    // Bestehen zu gefährden.
     const tausch = [];
-    if (slotsOffen === 0 && ctx.schnitt && beste) {
+    if (!manuell && slotsOffen === 0 && ctx.schnitt && beste) {
       let aktuell = gewaehlt.slice();
       let aktW = beste.w;
       const sStart = ctx.schnitt(aktW.E);
       for (let runde = 0; runde < 5; runde++) {
         let bester = null;
         for (const raus of aktuell) {
-          if (raus.kand.k || raus.p.wahl === 'ja') continue;
+          if (raus.kand.k) continue;
           for (const rein of optionen) {
-            if (aktuell.includes(rein) || rein.p.wahl === 'nein' || rein.kand.k) continue;
+            if (aktuell.includes(rein) || rein.kand.k) continue;
             const neu = aktuell.filter((o) => o !== raus).concat([rein]);
             const w = auswerten(neu);
             if (ctx.schnitt(w.E) !== sStart || (aktW.besteht && !w.besteht)) continue;
@@ -400,7 +480,10 @@ const Calc = (function () {
       }
     }
 
-    return { kandidaten, slotsGesamt, slotsOffen, zuStreichen, faecherMitSlots: proFach.length, kAnzahl, kOffen, hinweise, tausch };
+    return {
+      kandidaten, slotsGesamt, slotsOffen, zuStreichen, faecherMitSlots: proFach.length, kAnzahl, kOffen, hinweise, tausch,
+      modus: manuell ? 'manuell' : 'auto', waehlbar, festAnzahl: fest.length, manuellAnzahl,
+    };
   }
 
   /**
@@ -473,11 +556,13 @@ const Calc = (function () {
     // Einbringung und Streichvorschlag
     const extraGE = fpaGesamt === null ? [] : [fpaGesamt];
     const geRegel = (E, u) => u === 0 || (u === 1 && E >= min1) || (u === 2 && E >= min2);
+    const modus = streichModusVon(state, art);
     const ein = einbringen(faecher, slotsVon, anzahlHj, {
       pflicht: fsPflicht,
       faktor,
       apVon: (f) => pruefungsergebnis(f, art),
-      streichFeld: abi ? 'streichenAbi' : 'streichen',
+      manuell: modus === 'manuell' ? auswahlListe((state.gestrichen || {})[art]) : null,
+      behalten: (state.behalten && state.behalten[art]) || {},
       bewerten: (eHjl, ge) => {
         const E = Erest + eHjl;
         const u = zaehleUnter4(ge.concat(extraGE));
@@ -568,6 +653,11 @@ const Calc = (function () {
       kAnzahl: ein.kAnzahl,
       kOffen: ein.kOffen,
       tausch: ein.tausch,
+      streichModus: ein.modus,
+      waehlbar: ein.waehlbar,
+      gestrichenAnzahl: ein.kandidaten.filter((k) => k.gestrichen).length,
+      festAnzahl: ein.festAnzahl,
+      manuellAnzahl: ein.manuellAnzahl,
       faktor,
       pruefungen,
       fpa,
@@ -580,6 +670,77 @@ const Calc = (function () {
       hinweise,
       warnungen,
     };
+  }
+
+  /** Streichmodus einer Abschlussart; fehlt das Feld (alte Daten), gilt 'auto'. */
+  function streichModusVon(state, art) {
+    const m = state && state.streichModus && state.streichModus[art];
+    return m === 'manuell' ? 'manuell' : 'auto';
+  }
+
+  /**
+   * Die automatische Streichauswahl als { fachId: hj } (ohne k-Halbjahre, die immer dazukommen).
+   * Damit füllt die App die eigene Auswahl vor, wenn man „Automatisch streichen“ ausschaltet.
+   */
+  function autoAuswahl(state, art = 'fachabi') {
+    const a = auswertung({ ...state, streichModus: { ...(state.streichModus || {}), [art]: 'auto' } }, art);
+    const res = {};
+    for (const k of a.kandidaten) if (k.gestrichen && !k.k) res[k.fachId] = k.hj;
+    return res;
+  }
+
+  function streichFelder(state, art) {
+    state.streichModus = state.streichModus || {};
+    state.gestrichen = state.gestrichen || {};
+    state.behalten = state.behalten || {};
+    state.gestrichen[art] = state.gestrichen[art] || {};
+    state.behalten[art] = state.behalten[art] || {};
+  }
+
+  /**
+   * Manuell: Halbjahr antippen (ändert state). Gestrichenes Halbjahr (eigene Wahl oder automatisch
+   * ergänzt) => zurückholen und Fach behalten. Ungestrichenes => streichen (im selben Fach wandert
+   * die Streichung), Behalten des Fachs endet. Ergebnis: { geaendert, meldung }.
+   */
+  function streichTippen(state, art, fachId, hj) {
+    streichFelder(state, art);
+    const a = auswertung(state, art);
+    if (a.streichModus !== 'manuell' || !(a.waehlbar[fachId] || []).includes(hj)) return { geaendert: false, meldung: null };
+    const auswahl = state.gestrichen[art];
+    const behalten = state.behalten[art];
+    const k = a.kandidaten.find((x) => x.fachId === fachId && x.hj === hj);
+    if (k && k.gestrichen) {
+      if (auswahl[fachId] === hj) delete auswahl[fachId];
+      behalten[fachId] = true;
+      return { geaendert: true, meldung: null };
+    }
+    const n = a.zuStreichen;
+    const schonGewaehlt = a.kandidaten.some((x) => x.fachId === fachId && x.gestrichen && x.wahl === 'manuell');
+    if (!schonGewaehlt) {
+      if (!n) return { geaendert: false, meldung: 'Hier musst du kein Halbjahr streichen.' };
+      if (a.festAnzahl >= n) return { geaendert: false, meldung: `Du hast schon ${n} ${n === 1 ? 'Halbjahr' : 'Halbjahre'} gestrichen. Tipp erst ein gestrichenes an, um es zurückzunehmen.` };
+    }
+    auswahl[fachId] = hj;
+    delete behalten[fachId];
+    return { geaendert: true, meldung: null };
+  }
+
+  /**
+   * Modus setzen (ändert state). Aus ohne gespeicherte Auswahl: mit der automatischen Wahl vorbelegen.
+   * Ein: Auswahl bleibt gespeichert, „behalten“ wird gelöscht.
+   */
+  function streichModusSetzen(state, art, modus) {
+    streichFelder(state, art);
+    if (modus === 'manuell') {
+      const ids = new Set((state.faecher || []).map((f) => f.id));
+      const auswahl = state.gestrichen[art];
+      for (const id of Object.keys(auswahl)) if (!ids.has(id)) delete auswahl[id];
+      if (!Object.keys(auswahl).length) state.gestrichen[art] = autoAuswahl(state, art);
+      state.streichModus[art] = 'manuell';
+    } else {
+      state.behalten[art] = {};
+      state.streichModus[art] = 'auto';
+    }
   }
 
   const fachabitur = (state) => auswertung(state, 'fachabi');
@@ -607,6 +768,7 @@ const Calc = (function () {
     halbjahr, halbjahreDesFachs, einbringbareHalbjahre, einbringbareHalbjahreAbitur,
     pruefungsergebnis, fpaHalbjahr, seminarErgebnis,
     auswertung, fachabitur, abitur, benoetigteSumme, naechsteNoteFuer,
+    streichModusVon, autoAuswahl, auswahlListe, streichTippen, streichModusSetzen,
   };
 })();
 

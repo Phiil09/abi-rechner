@@ -170,8 +170,6 @@ const Presets = (function () {
       schulaufgaben: v.sa,
       wpf: v.wpf,
       gewichtung: { modus: 'fobos', saAnteil: 50 },
-      streichen: 'auto', // Fachabi: 'auto' | 'ja' (erzwingen) | 'nein' (möglichst nicht)
-      streichenAbi: 'auto', // dasselbe fürs Abitur (13. Klasse)
       noten: [],
       zeugnis: {},
       pruefung: { schriftlich: null, muendlich: null },
