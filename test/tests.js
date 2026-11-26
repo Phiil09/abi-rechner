@@ -217,7 +217,7 @@
   eq('WPF Szenisches Gestalten', P.wpfEinbringbar('szenisches gestalten'), false);
   eq('WPF Informatik', P.wpfEinbringbar('Informatik'), true);
   eq('WPF unbekannt', P.wpfEinbringbar('Schach'), null);
-  eq('Vorlage streichen auto', P.faecherFuer('technik')[0].streichen, 'auto');
+  eq('Vorlage ohne altes Feld streichen', P.faecherFuer('technik')[0].streichen, undefined);
 
   // Vollständiger Technik-Stand (alle HJ 11, Prüfungen 9/10/8/11, fpA 12/12) zum Abwandeln
   function technik(anpassen) {
@@ -252,18 +252,148 @@
   teilK[5].zeugnis = { '12_1': 'k' };
   eq('k im Teilstand gestrichen', C.fachabitur({ faecher: teilK, fpa: {} }).kandidaten.filter((k) => k.gestrichen).length, 1);
 
-  // 'ja' erzwingt
-  t = technik((by) => { by('Deutsch').streichen = 'ja'; by('Chemie').zeugnis['12_1'] = 3; });
+  // Alte Felder 'ja'/'nein' werden ignoriert: es gilt die automatische Regel
+  t = technik((by) => { const f = by('Technologie'); f.zeugnis['12_1'] = 3; f.streichen = 'nein'; by('Deutsch').streichen = 'ja'; });
   r2 = C.fachabitur(t.st);
-  eq('ja: Deutsch gestrichen (früheres HJ)', gestrichenIn(r2, t.by('Deutsch')), ['11_2']);
-  eq('ja: Chemie 3 trotzdem gestrichen', gestrichenIn(r2, t.by('Chemie')), ['12_1']);
+  eq('alt nein ignoriert: Technologie 3 gestrichen', gestrichenIn(r2, t.by('Technologie')), ['12_1']);
+  eq('alt ja ignoriert: Deutsch nicht erzwungen', gestrichenIn(r2, t.by('Deutsch')), []);
+  eq('alter Stand ohne Felder: Modus auto', [r2.streichModus, r2.E], ['auto', 413]);
 
-  // 'nein' sperrt
-  t = technik((by) => { const f = by('Technologie'); f.zeugnis['12_1'] = 3; f.streichen = 'nein'; });
-  r2 = C.fachabitur(t.st);
-  eq('nein: nicht gestrichen', gestrichenIn(r2, t.by('Technologie')), []);
-  eq('nein: E', r2.E, 405); // 114 + 24 + 24*11 + 3
-  eq('nein: 5 Streichungen', r2.kandidaten.filter((k) => k.gestrichen).length, 5);
+  // ===== Manuell streichen =====
+  const manuell = (st, auswahl, art = 'fachabi') => ({ ...st, streichModus: { [art]: 'manuell' }, gestrichen: { [art]: auswahl } });
+  const wahlIn = (r, f) => r.kandidaten.filter((k) => k.fachId === f.id && k.gestrichen).map((k) => k.wahl);
+  const anzahlGestrichen = (r) => r.kandidaten.filter((k) => k.gestrichen).length;
+
+  // Genau N (= 5) gewählt: Technologie 3 bleibt drin, weil der Nutzer anders entschieden hat
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
+  const id = (n) => t.by(n).id;
+  let wahl5 = { [id('Deutsch')]: '12_2', [id('Englisch')]: '12_1', [id('Physik')]: '11_2', [id('Chemie')]: '12_2', [id('Politik und Gesellschaft')]: '12_1' };
+  r2 = C.fachabitur(manuell(t.st, wahl5));
+  eq('manuell N: Modus', r2.streichModus, 'manuell');
+  eq('manuell N: Technologie bleibt', gestrichenIn(r2, t.by('Technologie')), []);
+  eq('manuell N: Deutsch 12/2', gestrichenIn(r2, t.by('Deutsch')), ['12_2']);
+  eq('manuell N: 5 gestrichen, alle von dir', [anzahlGestrichen(r2), r2.manuellAnzahl, r2.festAnzahl, r2.kandidaten.filter((k) => k.wahl === 'auto').length], [5, 5, 5, 0]);
+  eq('manuell N: E', [r2.E, r2.ergebnis], [405, 'bestanden']);
+  eq('manuell N: keine Warnung, kein Tausch', [r2.warnungen, r2.tausch], [[], []]);
+
+  // Weniger als N: der Rest wird automatisch ergänzt (Technologie 3 zuerst) und als auto markiert
+  r2 = C.fachabitur(manuell(t.st, { [id('Deutsch')]: '12_2', [id('Englisch')]: '12_1' }));
+  eq('manuell weniger: 5 gestrichen', anzahlGestrichen(r2), 5);
+  eq('manuell weniger: Zähler', [r2.manuellAnzahl, r2.festAnzahl], [2, 2]);
+  eq('manuell weniger: Deutsch von dir', wahlIn(r2, t.by('Deutsch')), ['manuell']);
+  eq('manuell weniger: Technologie auto ergänzt', [gestrichenIn(r2, t.by('Technologie')), wahlIn(r2, t.by('Technologie'))], [['12_1'], ['auto']]);
+  eq('manuell weniger: E legal', [r2.eingebrachtAnzahl, r2.E], [25, 413]);
+
+  // Wahl im unvollständigen Fach zählt (automatisch würde dort nicht gestrichen)
+  const teilM = P.faecherFuer('technik', 12, nov2026);
+  teilM[0].zeugnis = { '11_2': 10, '12_1': 5 }; // Deutsch, 12/2 fehlt noch
+  const stTeil = { faecher: teilM, fpa: {} };
+  eq('Teilstand auto: nichts gestrichen', anzahlGestrichen(C.fachabitur(stTeil)), 0);
+  r2 = C.fachabitur(manuell(stTeil, { [teilM[0].id]: '12_1' }));
+  eq('Teilstand manuell: Deutsch 12/1 gestrichen', gestrichenIn(r2, teilM[0]), ['12_1']);
+  eq('Teilstand manuell: E', r2.E, 10);
+  // Auch ein noch offenes Halbjahr lässt sich streichen; es fehlt dann nicht mehr
+  const offenVorher = C.fachabitur(stTeil).slotsOffen;
+  r2 = C.fachabitur(manuell(stTeil, { [teilM[0].id]: '12_2' }));
+  eq('Teilstand manuell: offenes HJ gestrichen', [gestrichenIn(r2, teilM[0]), r2.slotsOffen, r2.E], [['12_2'], offenVorher - 1, 15]);
+
+  // k ohne Wahl wird automatisch gestrichen und zählt zu N
+  t = technik((by) => { by('Chemie').zeugnis['12_1'] = 'k'; });
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_2' }));
+  eq('manuell k: Chemie k gestrichen, auto', [gestrichenIn(r2, t.by('Chemie')), wahlIn(r2, t.by('Chemie'))], [['12_1'], ['auto']]);
+  eq('manuell k: zählt zu N', [r2.festAnzahl, r2.manuellAnzahl, anzahlGestrichen(r2), r2.kOffen], [2, 1, 5, 0]);
+  eq('manuell k: bestanden', r2.ergebnis, 'bestanden');
+  eq('manuell k: Fach mit k nicht wählbar', r2.waehlbar[t.by('Chemie').id], []);
+  // Wahl im k-Fach zählt nicht, mit Hinweis
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Chemie').id]: '12_2' }));
+  eq('manuell k: Wahl im k-Fach ignoriert', [gestrichenIn(r2, t.by('Chemie')), r2.manuellAnzahl], [['12_1'], 0]);
+  eq('manuell k: Hinweis', r2.warnungen.some((w) => w.includes('ohne Note (k)')), true);
+  // k plus 5 eigene: das k geht vor, es zählen nur die ersten 4
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_2', [t.by('Englisch').id]: '12_1', [t.by('Mathematik').id]: '12_1', [t.by('Physik').id]: '12_1', [t.by('Geschichte').id]: '11_1' }));
+  eq('manuell k + 5: k gestrichen, Geschichte fällt raus', [gestrichenIn(r2, t.by('Chemie')), gestrichenIn(r2, t.by('Geschichte')), r2.manuellAnzahl, anzahlGestrichen(r2)], [['12_1'], [], 4, 5]);
+
+  // Ungültige Wahl: Sport, fpA, gelöschtes Fach, nicht einbringbares Halbjahr (Deutsch 11/1)
+  t = technik();
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Sport').id]: '12_1', fpa: '11_1', geloescht: '12_1', [t.by('Deutsch').id]: '11_1' }));
+  eq('ungültig: nichts übernommen', r2.manuellAnzahl, 0);
+  eq('ungültig: Sport nie gestrichen', r2.kandidaten.some((k) => k.fachId === t.by('Sport').id), false);
+  eq('ungültig: Deutsch 11/1 kein Kandidat', gestrichenIn(r2, t.by('Deutsch')).includes('11_1'), false);
+  eq('ungültig: Rest automatisch', [anzahlGestrichen(r2), r2.E], [5, 413]);
+  eq('ungültig: Sport nicht wählbar', r2.waehlbar[t.by('Sport').id], undefined);
+
+  // Zweite Wahl im selben Fach wird abgelehnt (Liste und Mehrfachwert)
+  r2 = C.fachabitur(manuell(t.st, [{ fachId: t.by('Deutsch').id, hj: '12_1' }, { fachId: t.by('Deutsch').id, hj: '12_2' }]));
+  eq('zweite Wahl im Fach (Liste)', [gestrichenIn(r2, t.by('Deutsch')), r2.manuellAnzahl], [['12_1'], 1]);
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: ['12_2', '12_1'] }));
+  eq('zweite Wahl im Fach (Mehrfachwert)', [gestrichenIn(r2, t.by('Deutsch')), r2.manuellAnzahl], [['12_2'], 1]);
+
+  // Mehr als N aus alten Daten: die ersten N in Fächer-Reihenfolge, mit Warnung
+  const zuViele = {};
+  for (const n of ['Geschichte', 'Chemie', 'Physik', 'Mathematik', 'Englisch', 'Deutsch']) zuViele[t.by(n).id] = n === 'Geschichte' ? '11_1' : '12_1';
+  r2 = C.fachabitur(manuell(t.st, zuViele));
+  eq('zu viele: 5 gestrichen', [anzahlGestrichen(r2), r2.manuellAnzahl], [5, 5]);
+  eq('zu viele: Geschichte (letztes Fach) fällt raus', gestrichenIn(r2, t.by('Geschichte')), []);
+  eq('zu viele: Deutsch (erstes Fach) bleibt', gestrichenIn(r2, t.by('Deutsch')), ['12_1']);
+  eq('zu viele: Warnung', r2.warnungen.some((w) => w.includes('möglich sind nur 5')), true);
+
+  // Moduswechsel: Auswahl bleibt gespeichert, auto ignoriert sie
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
+  const mitWahl = manuell(t.st, { [t.by('Deutsch').id]: '12_2' });
+  const aufAuto = { ...mitWahl, streichModus: { fachabi: 'auto' } };
+  r2 = C.fachabitur(aufAuto);
+  eq('Wechsel auf auto: Wahl ignoriert', [r2.streichModus, gestrichenIn(r2, t.by('Deutsch')), gestrichenIn(r2, t.by('Technologie'))], ['auto', [], ['12_1']]);
+  eq('Wechsel auf auto: Wahl bleibt gespeichert', aufAuto.gestrichen.fachabi[t.by('Deutsch').id], '12_2');
+  r2 = C.fachabitur({ ...aufAuto, streichModus: { fachabi: 'manuell' } });
+  eq('Wechsel zurück: Wahl wieder da', wahlIn(r2, t.by('Deutsch')), ['manuell']);
+  // Vorbelegung beim Ausschalten = automatische Wahl, dann ändert sich nichts
+  const vor = C.autoAuswahl(t.st, 'fachabi');
+  eq('autoAuswahl: 5 Fächer, Technologie 12/1', [Object.keys(vor).length, vor[t.by('Technologie').id]], [5, '12_1']);
+  const rAuto = C.fachabitur(t.st);
+  const rVor = C.fachabitur(manuell(t.st, vor));
+  eq('autoAuswahl: gleiches Ergebnis', [rVor.E, rVor.manuellAnzahl, rVor.kandidaten.filter((k) => k.gestrichen).map((k) => k.fachId + k.hj)], [rAuto.E, 5, rAuto.kandidaten.filter((k) => k.gestrichen).map((k) => k.fachId + k.hj)]);
+  // Zurückholen: Fach wird behalten, die Ergänzung nimmt ein anderes Fach
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
+  const tid = (n) => t.by(n).id;
+  const stB = manuell(t.st, { [tid('Deutsch')]: '12_2', [tid('Englisch')]: '12_1', [tid('Physik')]: '11_2', [tid('Technologie')]: '12_1' });
+  stB.behalten = { fachabi: {} };
+  eq('behalten: vorher Technologie von dir', wahlIn(C.fachabitur(stB), t.by('Technologie')), ['manuell']);
+  eq('behalten: Zurückholen ändert', C.streichTippen(stB, 'fachabi', tid('Technologie'), '12_1').geaendert, true);
+  eq('behalten: Fach gemerkt, Wahl weg', [stB.behalten.fachabi[tid('Technologie')], stB.gestrichen.fachabi[tid('Technologie')]], [true, undefined]);
+  r2 = C.fachabitur(stB);
+  eq('behalten: Technologie zählt, anderes Fach ergänzt', [gestrichenIn(r2, t.by('Technologie')), anzahlGestrichen(r2), r2.kandidaten.filter((k) => k.wahl === 'auto').length, r2.warnungen], [[], 5, 2, []]);
+  // Gestrichelten Chip antippen: wird zurückgeholt und behalten, nicht zur eigenen Wahl
+  const autoK = r2.kandidaten.find((k) => k.gestrichen && k.wahl === 'auto');
+  C.streichTippen(stB, 'fachabi', autoK.fachId, autoK.hj);
+  r2 = C.fachabitur(stB);
+  eq('gestrichelt antippen: behalten, keine eigene Wahl', [stB.behalten.fachabi[autoK.fachId], stB.gestrichen.fachabi[autoK.fachId], r2.manuellAnzahl], [true, undefined, 3]);
+  eq('gestrichelt antippen: Fach nicht mehr gestrichen', r2.kandidaten.some((k) => k.fachId === autoK.fachId && k.gestrichen), false);
+  eq('gestrichelt antippen: trotzdem 5', anzahlGestrichen(r2), 5);
+  // Im behaltenen Fach streichen: Behalten endet
+  eq('streichen im behaltenen Fach', C.streichTippen(stB, 'fachabi', tid('Technologie'), '12_2').geaendert, true);
+  eq('streichen im behaltenen Fach: Behalten weg', [stB.behalten.fachabi[tid('Technologie')], stB.gestrichen.fachabi[tid('Technologie')]], [undefined, '12_2']);
+  // Volle Auswahl: neues Fach antippen geht nicht, mit Meldung
+  C.streichTippen(stB, 'fachabi', tid('Chemie'), '12_1');
+  const voll = C.streichTippen(stB, 'fachabi', tid('Mathematik'), '12_1');
+  eq('voll: Meldung', [voll.geaendert, voll.meldung], [false, 'Du hast schon 5 Halbjahre gestrichen. Tipp erst ein gestrichenes an, um es zurückzunehmen.']);
+  // Behaltenes Fach nur, wenn nichts anderes übrig ist, mit Warnung
+  const stRest = manuell(t.st, { [tid('Deutsch')]: '12_2', [tid('Englisch')]: '12_1', [tid('Physik')]: '11_2', [tid('Chemie')]: '12_2' });
+  stRest.behalten = { fachabi: {} };
+  for (const f of t.st.faecher) if (!stRest.gestrichen.fachabi[f.id]) stRest.behalten.fachabi[f.id] = true;
+  r2 = C.fachabitur(stRest);
+  eq('alles behalten: trotzdem 5 gestrichen', [anzahlGestrichen(r2), gestrichenIn(r2, t.by('Technologie')), wahlIn(r2, t.by('Technologie'))], [5, ['12_1'], ['auto']]);
+  eq('alles behalten: Warnung', r2.warnungen.some((w) => w.startsWith('Technologie soll zählen')), true);
+  // Behalten im Auto-Modus ohne Wirkung; Wechsel auf Ein löscht es, Auswahl bleibt
+  eq('behalten im Auto-Modus ignoriert', gestrichenIn(C.fachabitur({ ...stRest, streichModus: { fachabi: 'auto' } }), t.by('Technologie')), ['12_1']);
+  C.streichModusSetzen(stRest, 'fachabi', 'auto');
+  eq('Ein: behalten gelöscht, Auswahl bleibt', [stRest.streichModus.fachabi, Object.keys(stRest.behalten.fachabi).length, Object.keys(stRest.gestrichen.fachabi).length], ['auto', 0, 4]);
+  C.streichModusSetzen(stRest, 'fachabi', 'manuell');
+  eq('Aus mit gespeicherter Auswahl: keine Vorbelegung', Object.keys(stRest.gestrichen.fachabi).length, 4);
+  const stLeer = { ...t.st, faecher: t.st.faecher };
+  C.streichModusSetzen(stLeer, 'fachabi', 'manuell');
+  eq('Aus ohne Auswahl: vorbelegt', [stLeer.streichModus.fachabi, Object.keys(stLeer.gestrichen.fachabi).length], ['manuell', 5]);
+
+  // Modus ohne Feld
+  eq('streichModusVon ohne Feld', [C.streichModusVon({}, 'fachabi'), C.streichModusVon({ streichModus: { abitur: 'manuell' } }, 'fachabi')], ['auto', 'auto']);
 
   // Bei Gleichstand im Fach: früheres Halbjahr
   t = technik((by) => { const f = by('Chemie'); f.zeugnis['11_2'] = 2; f.zeugnis['12_2'] = 2; });
@@ -337,11 +467,22 @@
   eq('mAP Englisch fehlt: unvollständig', [r2.vollstaendig, r2.ergebnis], [false, 'unvollständig']);
   eq('mAP Englisch fehlt: Hinweis', r2.hinweise.some((h) => h.includes('Englisch')), true);
 
-  // Abitur: streichenAbi = 'nein' sperrt im 13er-Pfad
-  const faN = fa.map((f) => (f.name === 'Chemie' ? { ...f, streichenAbi: 'nein', zeugnis: { ...f.zeugnis, '13_1': 2 } } : f));
-  eq('Abitur nein', C.abitur({ ...stAbi, faecher: faN }).kandidaten.some((k) => k.gestrichen && k.hj === '13_1' && faN.find((f) => f.id === k.fachId).name === 'Chemie'), false);
-  const faJ = fa.map((f) => (f.name === 'Chemie' ? { ...f, zeugnis: { ...f.zeugnis, '13_1': 2 } } : f));
-  eq('Abitur auto streicht 2', C.abitur({ ...stAbi, faecher: faJ }).kandidaten.some((k) => k.gestrichen && k.punkte === 2), true);
+  // Abitur: automatisch streicht die 2, alte streichenAbi = 'nein' wird ignoriert
+  const faJ = fa.map((f) => (f.name === 'Chemie' ? { ...f, streichenAbi: 'nein', zeugnis: { ...f.zeugnis, '13_1': 2 } } : f));
+  const stJ = { ...stAbi, faecher: faJ };
+  const fid = (n) => faJ.find((f) => f.name === n).id;
+  const chemieAbi = (r) => r.kandidaten.filter((k) => k.gestrichen && k.fachId === fid('Chemie')).map((k) => k.hj);
+  eq('Abitur auto streicht 2', chemieAbi(C.abitur(stJ)), ['13_1']);
+  // Abitur manuell: eigener Modus, eigene Auswahl
+  let rAbi = C.abitur(manuell(stJ, { [fid('Deutsch')]: '13_2', [fid('Mathematik')]: '13_1' }, 'abitur'));
+  eq('Abitur manuell: Chemie bleibt', [rAbi.streichModus, chemieAbi(rAbi), rAbi.manuellAnzahl, rAbi.zuStreichen], ['manuell', [], 2, 2]);
+  eq('Abitur manuell: E', rAbi.E, 265); // 2*38 + 2*11 + 15*11 + 2
+  eq('Abitur manuell: Fachabi bleibt auto', C.fachabitur(manuell(stJ, { [fid('Deutsch')]: '13_2' }, 'abitur')).streichModus, 'auto');
+  // 2. Fremdsprache in 13: Pflicht-Halbjahre sind nicht wählbar
+  const stFS = { ...stJ, zweiteFS: { modus: 'jgst13', fachId: fid('Englisch') } };
+  rAbi = C.abitur(manuell(stFS, { [fid('Englisch')]: '13_1', [fid('Deutsch')]: '13_2' }, 'abitur'));
+  eq('Abitur manuell 2. FS: nicht wählbar', rAbi.waehlbar[fid('Englisch')], []);
+  eq('Abitur manuell 2. FS: Wahl ignoriert, Rest auto', [rAbi.manuellAnzahl, rAbi.kandidaten.some((k) => k.gestrichen && k.fachId === fid('Englisch')), chemieAbi(rAbi)], [1, false, ['13_1']]);
 
   log(`${ok} Tests bestanden, ${fail} fehlgeschlagen`);
   if (fail && isNode) process.exitCode = 1;
