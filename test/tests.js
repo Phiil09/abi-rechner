@@ -18,6 +18,10 @@
     else { fail++; log(`FEHLER: ${name}: ist ${JSON.stringify(ist)}, soll ${JSON.stringify(soll)}`); }
   }
 
+  // Streichmodus setzen: 'ein' (mit optionaler eigener Wahl) bzw. 'aus'
+  const ein = (st, art = 'fachabi') => ({ ...st, streichModus: { ...(st.streichModus || {}), [art]: 'ein' } });
+  const nah = (a, b) => Math.abs(a - b) < 1e-9;
+
   // § 19 Abs. 6 Rundung
   eq('runde 9,5', C.rundePunkte(9.5), 10);
   eq('runde 9,49', C.rundePunkte(9.49), 9);
@@ -107,7 +111,7 @@
   // ein schlechtes Halbjahr, das gestrichen werden soll
   fs[4].zeugnis['12_1'] = 3;
   const st = { faecher: fs, fpa: { '11_1': { ergebnis: 12 }, '11_2': { ergebnis: 12 } } };
-  const r = C.fachabitur(st);
+  const r = C.fachabitur(ein(st));
   eq('Technik vollständig', r.vollstaendig, true);
   eq('Technik eingebracht', r.eingebrachtAnzahl, 25);
   eq('Technik 3er gestrichen', r.kandidaten.find((k) => k.fachId === fs[4].id && k.hj === '12_1').gestrichen, true);
@@ -121,7 +125,7 @@
   // Teilstand: einzige Note eines Fachs darf nicht gestrichen werden
   const teil = P.faecherFuer('technik');
   teil[0].zeugnis = { '12_1': 10 };
-  const rt = C.fachabitur({ faecher: teil, fpa: {} });
+  const rt = C.fachabitur(ein({ faecher: teil, fpa: {} }));
   eq('Teilstand nichts gestrichen', rt.kandidaten.filter((k) => k.gestrichen).length, 0);
   eq('Teilstand E/M', [rt.E, rt.M], [10, 15]);
   eq('Teilstand S', rt.S, 2.3); // 17/3 - 5 * 10/15 = 2,333 -> 2,3
@@ -159,18 +163,18 @@
   }
   fa.filter((f) => f.pruefungsfachAbi).forEach((f, i) => { f.pruefungAbi = { schriftlich: pruefWerte[i] }; });
   const stAbi = { faecher: fa, seminar: { phase: 10, arbeit: 12, gespraech: 11 } };
-  const ra = C.abitur(stAbi);
+  const ra = C.abitur(ein(stAbi, 'abitur'));
   // E = 2*38 + 2*11 + 16*11 = 76 + 22 + 176 = 274; S = 5,667 - 5*274/390 = 2,154 -> 2,1
   eq('Abitur vollständig', ra.vollstaendig, true);
   eq('Abitur E/M', [ra.E, ra.M], [274, 390]);
   eq('Abitur S', ra.S, 2.1);
   eq('Abitur bestanden', ra.bestehen.every((b) => b.ok), true);
   // Mit Ergänzungsprüfung 2. Fremdsprache (x2): M = 420, E = 274 + 2*10 = 294
-  const ra2 = C.abitur({ ...stAbi, zweiteFS: { modus: 'ergaenzung', pruefung: 10 } });
+  const ra2 = C.abitur(ein({ ...stAbi, zweiteFS: { modus: 'ergaenzung', pruefung: 10 } }, 'abitur'));
   eq('Abitur 420', [ra2.E, ra2.M, ra2.Mgesamt], [294, 420, 420]);
   // Prüfung mit 0 Punkten => nicht bestanden
   const fa0 = fa.map((f) => (f.name === 'Deutsch' ? { ...f, pruefungAbi: { schriftlich: 0 } } : f));
-  eq('Abitur Prüfung 0', C.abitur({ ...stAbi, faecher: fa0 }).bestehen.some((b) => !b.ok), true);
+  eq('Abitur Prüfung 0', C.abitur(ein({ ...stAbi, faecher: fa0 }, 'abitur')).bestehen.some((b) => !b.ok), true);
 
   // 13. Klasse nachträglich ergänzen: Noten bleiben erhalten
   const f12 = P.faecherFuer('technik', 12, nov2026);
@@ -229,11 +233,12 @@
     if (anpassen) anpassen(by, fx);
     return { st: { faecher: fx, fpa: { '11_1': { ergebnis: 12 }, '11_2': { ergebnis: 12 } } }, by };
   }
+  const anzahlGestrichenAlle = (r) => r.kandidaten.filter((k) => k.gestrichen).length;
   const gestrichenIn = (r, f) => r.kandidaten.filter((k) => k.fachId === f.id && k.gestrichen).map((k) => k.hj);
 
   // k wird gestrichen
   let t = technik((by) => { by('Chemie').zeugnis['12_1'] = 'k'; });
-  let r2 = C.fachabitur(t.st);
+  let r2 = C.fachabitur(ein(t.st));
   eq('k gestrichen', gestrichenIn(r2, t.by('Chemie')), ['12_1']);
   eq('k: E unverändert', r2.E, 413);
   eq('k: bestanden', r2.ergebnis, 'bestanden');
@@ -241,26 +246,27 @@
 
   // zu viele k => nicht bestanden (N = 5, aber 6 k)
   t = technik((by) => { ['Deutsch', 'Englisch', 'Mathematik', 'Physik', 'Chemie', 'Geschichte'].forEach((n) => { by(n).zeugnis[n === 'Geschichte' ? '11_1' : '12_1'] = 'k'; }); });
-  r2 = C.fachabitur(t.st);
+  r2 = C.fachabitur(ein(t.st));
   eq('6 k: nicht bestanden', r2.ergebnis, 'nicht bestanden');
   eq('6 k: eins offen', r2.kOffen, 1);
   // zwei k im selben Fach => nicht bestanden
   t = technik((by) => { by('Chemie').zeugnis['12_1'] = 'k'; by('Chemie').zeugnis['12_2'] = 'k'; });
-  eq('2 k in einem Fach', C.fachabitur(t.st).ergebnis, 'nicht bestanden');
+  eq('2 k in einem Fach', C.fachabitur(ein(t.st)).ergebnis, 'nicht bestanden');
   // k auch im Teilstand sofort gestrichen
   const teilK = P.faecherFuer('technik', 12, nov2026);
   teilK[5].zeugnis = { '12_1': 'k' };
-  eq('k im Teilstand gestrichen', C.fachabitur({ faecher: teilK, fpa: {} }).kandidaten.filter((k) => k.gestrichen).length, 1);
+  eq('k im Teilstand gestrichen', C.fachabitur(ein({ faecher: teilK, fpa: {} })).kandidaten.filter((k) => k.gestrichen).length, 1);
 
-  // Alte Felder 'ja'/'nein' werden ignoriert: es gilt die automatische Regel
+  // Alte Felder 'ja'/'nein' werden ignoriert: es gilt die automatische Regel ('ein' ohne Wahl)
   t = technik((by) => { const f = by('Technologie'); f.zeugnis['12_1'] = 3; f.streichen = 'nein'; by('Deutsch').streichen = 'ja'; });
-  r2 = C.fachabitur(t.st);
+  r2 = C.fachabitur(ein(t.st));
   eq('alt nein ignoriert: Technologie 3 gestrichen', gestrichenIn(r2, t.by('Technologie')), ['12_1']);
   eq('alt ja ignoriert: Deutsch nicht erzwungen', gestrichenIn(r2, t.by('Deutsch')), []);
-  eq('alter Stand ohne Felder: Modus auto', [r2.streichModus, r2.E], ['auto', 413]);
+  eq('ein ohne Wahl: Modus ein', [r2.streichModus, r2.E], ['ein', 413]);
+  eq('alter Stand ohne Felder: Modus aus, nichts gestrichen', [C.fachabitur(t.st).streichModus, anzahlGestrichenAlle(C.fachabitur(t.st))], ['aus', 0]);
 
-  // ===== Manuell streichen =====
-  const manuell = (st, auswahl, art = 'fachabi') => ({ ...st, streichModus: { [art]: 'manuell' }, gestrichen: { [art]: auswahl } });
+  // ===== „Streichen“ an, mit eigener Wahl =====
+  const manuell = (st, auswahl, art = 'fachabi') => ({ ...st, streichModus: { [art]: 'ein' }, gestrichen: { [art]: auswahl } });
   const wahlIn = (r, f) => r.kandidaten.filter((k) => k.fachId === f.id && k.gestrichen).map((k) => k.wahl);
   const anzahlGestrichen = (r) => r.kandidaten.filter((k) => k.gestrichen).length;
 
@@ -269,7 +275,7 @@
   const id = (n) => t.by(n).id;
   let wahl5 = { [id('Deutsch')]: '12_2', [id('Englisch')]: '12_1', [id('Physik')]: '11_2', [id('Chemie')]: '12_2', [id('Politik und Gesellschaft')]: '12_1' };
   r2 = C.fachabitur(manuell(t.st, wahl5));
-  eq('manuell N: Modus', r2.streichModus, 'manuell');
+  eq('manuell N: Modus', r2.streichModus, 'ein');
   eq('manuell N: Technologie bleibt', gestrichenIn(r2, t.by('Technologie')), []);
   eq('manuell N: Deutsch 12/2', gestrichenIn(r2, t.by('Deutsch')), ['12_2']);
   eq('manuell N: 5 gestrichen, alle von dir', [anzahlGestrichen(r2), r2.manuellAnzahl, r2.festAnzahl, r2.kandidaten.filter((k) => k.wahl === 'auto').length], [5, 5, 5, 0]);
@@ -288,7 +294,7 @@
   const teilM = P.faecherFuer('technik', 12, nov2026);
   teilM[0].zeugnis = { '11_2': 10, '12_1': 5 }; // Deutsch, 12/2 fehlt noch
   const stTeil = { faecher: teilM, fpa: {} };
-  eq('Teilstand auto: nichts gestrichen', anzahlGestrichen(C.fachabitur(stTeil)), 0);
+  eq('Teilstand ein ohne Wahl: nichts gestrichen', anzahlGestrichen(C.fachabitur(ein(stTeil))), 0);
   r2 = C.fachabitur(manuell(stTeil, { [teilM[0].id]: '12_1' }));
   eq('Teilstand manuell: Deutsch 12/1 gestrichen', gestrichenIn(r2, teilM[0]), ['12_1']);
   eq('Teilstand manuell: E', r2.E, 10);
@@ -336,19 +342,19 @@
   eq('zu viele: Deutsch (erstes Fach) bleibt', gestrichenIn(r2, t.by('Deutsch')), ['12_1']);
   eq('zu viele: Warnung', r2.warnungen.some((w) => w.includes('möglich sind nur 5')), true);
 
-  // Moduswechsel: Auswahl bleibt gespeichert, auto ignoriert sie
+  // Moduswechsel: Auswahl bleibt gespeichert, 'aus' streicht trotzdem nichts
   t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
   const mitWahl = manuell(t.st, { [t.by('Deutsch').id]: '12_2' });
-  const aufAuto = { ...mitWahl, streichModus: { fachabi: 'auto' } };
-  r2 = C.fachabitur(aufAuto);
-  eq('Wechsel auf auto: Wahl ignoriert', [r2.streichModus, gestrichenIn(r2, t.by('Deutsch')), gestrichenIn(r2, t.by('Technologie'))], ['auto', [], ['12_1']]);
-  eq('Wechsel auf auto: Wahl bleibt gespeichert', aufAuto.gestrichen.fachabi[t.by('Deutsch').id], '12_2');
-  r2 = C.fachabitur({ ...aufAuto, streichModus: { fachabi: 'manuell' } });
+  const aufAus = { ...mitWahl, streichModus: { fachabi: 'aus' } };
+  r2 = C.fachabitur(aufAus);
+  eq('Wechsel auf aus: nichts gestrichen', [r2.streichModus, anzahlGestrichen(r2), gestrichenIn(r2, t.by('Deutsch')), gestrichenIn(r2, t.by('Technologie'))], ['aus', 0, [], []]);
+  eq('Wechsel auf aus: Wahl bleibt gespeichert', aufAus.gestrichen.fachabi[t.by('Deutsch').id], '12_2');
+  r2 = C.fachabitur({ ...aufAus, streichModus: { fachabi: 'ein' } });
   eq('Wechsel zurück: Wahl wieder da', wahlIn(r2, t.by('Deutsch')), ['manuell']);
-  // Vorbelegung beim Ausschalten = automatische Wahl, dann ändert sich nichts
+  // Der automatische Vorschlag als Auswahl übernommen ändert nichts
   const vor = C.autoAuswahl(t.st, 'fachabi');
   eq('autoAuswahl: 5 Fächer, Technologie 12/1', [Object.keys(vor).length, vor[t.by('Technologie').id]], [5, '12_1']);
-  const rAuto = C.fachabitur(t.st);
+  const rAuto = C.fachabitur(ein(t.st));
   const rVor = C.fachabitur(manuell(t.st, vor));
   eq('autoAuswahl: gleiches Ergebnis', [rVor.E, rVor.manuellAnzahl, rVor.kandidaten.filter((k) => k.gestrichen).map((k) => k.fachId + k.hj)], [rAuto.E, 5, rAuto.kandidaten.filter((k) => k.gestrichen).map((k) => k.fachId + k.hj)]);
   // Zurückholen: Fach wird behalten, die Ergänzung nimmt ein anderes Fach
@@ -382,22 +388,28 @@
   r2 = C.fachabitur(stRest);
   eq('alles behalten: trotzdem 5 gestrichen', [anzahlGestrichen(r2), gestrichenIn(r2, t.by('Technologie')), wahlIn(r2, t.by('Technologie'))], [5, ['12_1'], ['auto']]);
   eq('alles behalten: Warnung', r2.warnungen.some((w) => w.startsWith('Technologie soll zählen')), true);
-  // Behalten im Auto-Modus ohne Wirkung; Wechsel auf Ein löscht es, Auswahl bleibt
-  eq('behalten im Auto-Modus ignoriert', gestrichenIn(C.fachabitur({ ...stRest, streichModus: { fachabi: 'auto' } }), t.by('Technologie')), ['12_1']);
-  C.streichModusSetzen(stRest, 'fachabi', 'auto');
-  eq('Ein: behalten gelöscht, Auswahl bleibt', [stRest.streichModus.fachabi, Object.keys(stRest.behalten.fachabi).length, Object.keys(stRest.gestrichen.fachabi).length], ['auto', 0, 4]);
-  C.streichModusSetzen(stRest, 'fachabi', 'manuell');
-  eq('Aus mit gespeicherter Auswahl: keine Vorbelegung', Object.keys(stRest.gestrichen.fachabi).length, 4);
+  // Im Modus 'aus' wirkt nichts davon; Wechsel ein -> aus -> ein behält Auswahl und behalten
+  eq('behalten in aus: nichts gestrichen', anzahlGestrichen(C.fachabitur({ ...stRest, streichModus: { fachabi: 'aus' } })), 0);
+  const behaltenVorher = Object.keys(stRest.behalten.fachabi).length;
+  C.streichModusSetzen(stRest, 'fachabi', 'aus');
+  eq('Aus: Auswahl und behalten bleiben gespeichert', [stRest.streichModus.fachabi, Object.keys(stRest.behalten.fachabi).length, Object.keys(stRest.gestrichen.fachabi).length, anzahlGestrichen(C.fachabitur(stRest))], ['aus', behaltenVorher, 4, 0]);
+  C.streichModusSetzen(stRest, 'fachabi', 'ein');
+  eq('Ein: gespeicherte Auswahl wieder aktiv', [stRest.streichModus.fachabi, Object.keys(stRest.gestrichen.fachabi).length, C.fachabitur(stRest).manuellAnzahl], ['ein', 4, 4]);
   const stLeer = { ...t.st, faecher: t.st.faecher };
-  C.streichModusSetzen(stLeer, 'fachabi', 'manuell');
-  eq('Aus ohne Auswahl: vorbelegt', [stLeer.streichModus.fachabi, Object.keys(stLeer.gestrichen.fachabi).length], ['manuell', 5]);
+  C.streichModusSetzen(stLeer, 'fachabi', 'ein');
+  r2 = C.fachabitur(stLeer);
+  eq('Ein ohne Auswahl: keine Vorbelegung, Vorschlag gestrichelt', [stLeer.streichModus.fachabi, Object.keys(stLeer.gestrichen.fachabi).length, anzahlGestrichen(r2), r2.kandidaten.filter((k) => k.wahl === 'auto').length, r2.manuellAnzahl], ['ein', 0, 5, 5, 0]);
+  // Antippen geht nur im Modus 'ein'
+  const stAusTipp = { ...t.st, streichModus: { fachabi: 'aus' } };
+  eq('aus: Antippen ohne Wirkung', C.streichTippen(stAusTipp, 'fachabi', tid('Deutsch'), '12_1').geaendert, false);
 
-  // Modus ohne Feld
-  eq('streichModusVon ohne Feld', [C.streichModusVon({}, 'fachabi'), C.streichModusVon({ streichModus: { abitur: 'manuell' } }, 'fachabi')], ['auto', 'auto']);
+  // Modus ohne Feld: 'aus'; alte Werte
+  eq('streichModusVon ohne Feld', [C.streichModusVon({}, 'fachabi'), C.streichModusVon({ streichModus: { abitur: 'ein' } }, 'fachabi')], ['aus', 'aus']);
+  eq('Modus alt: auto -> aus, manuell -> ein', ['auto', 'manuell', undefined, 'ein', 'aus', 'quatsch'].map(C.streichModusNormalisieren), ['aus', 'ein', 'aus', 'ein', 'aus', 'aus']);
 
   // Bei Gleichstand im Fach: früheres Halbjahr
   t = technik((by) => { const f = by('Chemie'); f.zeugnis['11_2'] = 2; f.zeugnis['12_2'] = 2; });
-  eq('Gleichstand: früheres HJ', gestrichenIn(C.fachabitur(t.st), t.by('Chemie')), ['11_2']);
+  eq('Gleichstand: früheres HJ', gestrichenIn(C.fachabitur(ein(t.st)), t.by('Chemie')), ['11_2']);
 
   // Rettung schlägt niedrigere Punkte: ohne Rettung 3 GE-Unterpunktungen (nicht bestanden)
   t = technik((by) => {
@@ -406,22 +418,24 @@
     by('Religionslehre/Ethik').zeugnis = { '12_1': 2, '12_2': 2 }; // GE 2, nicht zu retten
     for (const n of ['Mathematik Additum', 'Wahlpflichtfach 1', 'Wahlpflichtfach 2', 'Technologie', 'Chemie']) by(n).zeugnis['12_1'] = 0;
   });
-  r2 = C.fachabitur(t.st);
+  r2 = C.fachabitur(ein(t.st));
   eq('Rettung: Geschichte 11/1 gestrichen', gestrichenIn(r2, t.by('Geschichte')), ['11_1']);
-  eq('Rettung: Chemie 0 bleibt (niedriger, aber keine Rettung)', gestrichenIn(r2, t.by('Chemie')), []);
+  // Technologie und Chemie {11, 0, 11} sind gleichwertig: Chemie steht im Tool weiter oben (Zeile 16 vor 18)
+  eq('Rettung: Technologie 0 bleibt (niedriger, aber keine Rettung)', [gestrichenIn(r2, t.by('Technologie')), gestrichenIn(r2, t.by('Chemie'))], [[], ['12_1']]);
   eq('Rettung: nur so viele wie nötig', gestrichenIn(r2, t.by('Politik und Gesellschaft')), []);
   eq('Rettung: 2 Unterpunktungen', r2.geUnter4, 2);
   eq('Rettung: bestanden', r2.ergebnis, 'bestanden');
 
-  // Gesamtergebnisoptimierter Vorschlag: Chemie 11/2 statt Geschichte 11/1 hebt Chemie auf 13, Schnitt bleibt 2,1
+  // Gesamtergebnisoptimierter Vorschlag: Chemie 11/2 statt Religion 12/1 hebt Chemie auf 13, Schnitt bleibt 2,1
+  // (Religion, Geschichte, PuG und die WPF haben gleichwertige 10er; Religion steht im Tool ganz oben)
   t = technik((by) => {
     by('Geschichte').zeugnis['11_1'] = 10;
     for (const n of ['Politik und Gesellschaft', 'Religionslehre/Ethik', 'Wahlpflichtfach 1', 'Wahlpflichtfach 2']) by(n).zeugnis['12_1'] = 10;
     by('Chemie').zeugnis = { '11_2': 11, '12_1': 13, '12_2': 13 };
   });
-  r2 = C.fachabitur(t.st);
+  r2 = C.fachabitur(ein(t.st));
   eq('Tausch: E/S', [r2.E, r2.S], [417, 2.1]);
-  eq('Tausch-Vorschlag', r2.tausch.map((x) => [x.stattFachId === t.by('Geschichte').id, x.fachId === t.by('Chemie').id, x.hj, x.gePunkteVorher, x.gePunkteNachher, x.punkteVerlust]), [[true, true, '11_2', 12, 13, 1]]);
+  eq('Tausch-Vorschlag', r2.tausch.map((x) => [x.stattFachId === t.by('Religionslehre/Ethik').id, x.fachId === t.by('Chemie').id, x.hj, x.gePunkteVorher, x.gePunkteNachher, x.punkteVerlust]), [[true, true, '11_2', 12, 13, 1]]);
 
   // Eigene Fächer mit genau 25 Halbjahren (keine Streichung), um E genau zu treffen
   function eigene(werte, fpa = [4, 4]) {
@@ -434,7 +448,7 @@
       f('Physik', { 12: true }, zw(4, 4), { schriftlich: 4 }),
     ];
     for (let i = 5; i <= 12; i++) fx.push(f(`F${i}`, { 12: true }, zw(...(werte[`F${i}`] || [4, 4])), null));
-    return C.fachabitur({ faecher: fx, fpa: { '11_1': { ergebnis: fpa[0] }, '11_2': { ergebnis: fpa[1] } } });
+    return C.fachabitur(ein({ faecher: fx, fpa: { '11_1': { ergebnis: fpa[0] }, '11_2': { ergebnis: fpa[1] } } }));
   }
   // 1 Unterpunktung: E >= 195 nötig
   let re = eigene({ F5: [3, 3], F6: [15, 15], F7: [15, 12] });
@@ -472,17 +486,200 @@
   const stJ = { ...stAbi, faecher: faJ };
   const fid = (n) => faJ.find((f) => f.name === n).id;
   const chemieAbi = (r) => r.kandidaten.filter((k) => k.gestrichen && k.fachId === fid('Chemie')).map((k) => k.hj);
-  eq('Abitur auto streicht 2', chemieAbi(C.abitur(stJ)), ['13_1']);
+  eq('Abitur ein ohne Wahl streicht 2', chemieAbi(C.abitur(ein(stJ, 'abitur'))), ['13_1']);
   // Abitur manuell: eigener Modus, eigene Auswahl
   let rAbi = C.abitur(manuell(stJ, { [fid('Deutsch')]: '13_2', [fid('Mathematik')]: '13_1' }, 'abitur'));
-  eq('Abitur manuell: Chemie bleibt', [rAbi.streichModus, chemieAbi(rAbi), rAbi.manuellAnzahl, rAbi.zuStreichen], ['manuell', [], 2, 2]);
+  eq('Abitur manuell: Chemie bleibt', [rAbi.streichModus, chemieAbi(rAbi), rAbi.manuellAnzahl, rAbi.zuStreichen], ['ein', [], 2, 2]);
   eq('Abitur manuell: E', rAbi.E, 265); // 2*38 + 2*11 + 15*11 + 2
-  eq('Abitur manuell: Fachabi bleibt auto', C.fachabitur(manuell(stJ, { [fid('Deutsch')]: '13_2' }, 'abitur')).streichModus, 'auto');
+  eq('Abitur manuell: Fachabi bleibt aus', C.fachabitur(manuell(stJ, { [fid('Deutsch')]: '13_2' }, 'abitur')).streichModus, 'aus');
   // 2. Fremdsprache in 13: Pflicht-Halbjahre sind nicht wählbar
   const stFS = { ...stJ, zweiteFS: { modus: 'jgst13', fachId: fid('Englisch') } };
   rAbi = C.abitur(manuell(stFS, { [fid('Englisch')]: '13_1', [fid('Deutsch')]: '13_2' }, 'abitur'));
   eq('Abitur manuell 2. FS: nicht wählbar', rAbi.waehlbar[fid('Englisch')], []);
   eq('Abitur manuell 2. FS: Wahl ignoriert, Rest auto', [rAbi.manuellAnzahl, rAbi.kandidaten.some((k) => k.gestrichen && k.fachId === fid('Englisch')), chemieAbi(rAbi)], [1, false, ['13_1']]);
+
+  // ===== „Streichen“ aus (Standard): nichts gestrichen, Halbjahresteil auf 25 bzw. 16 umgerechnet =====
+
+  // Standard ist 'aus', für Fachabi und Abitur
+  eq('Standard: aus', [C.streichModusVon({}, 'fachabi'), C.streichModusVon({}, 'abitur')], ['aus', 'aus']);
+  eq('Standard nach Normalisieren', C.streichDatenNormalisieren({}).streichModus, { fachabi: 'aus', abitur: 'aus' });
+  eq('Technik-Stand ohne Modus: aus', C.fachabitur(technik().st).streichModus, 'aus');
+
+  // Technik: alle 30 einbringbaren Halbjahre 11 Punkte, nur Geschichte 11/1 = 5 (Fach endet in der 11.)
+  t = technik((by) => { by('Geschichte').zeugnis['11_1'] = 5; });
+  const rAus = C.fachabitur(t.st);
+  const geschichte111 = rAus.kandidaten.find((k) => k.fachId === t.by('Geschichte').id && k.hj === '11_1');
+  eq('aus: nichts gestrichen', anzahlGestrichen(rAus), 0);
+  eq('aus: Geschichte 11/1 zählt', [!!geschichte111, geschichte111.gestrichen, geschichte111.punkte], [true, false, 5]);
+  eq('aus: alle 30 Halbjahre zählen', [rAus.eingebrachtAnzahl, rAus.zaehlbarHj], [30, 30]);
+  // Summe HJ = 29 × 11 + 5 = 324; HJ-Teil = 324 × 25 / 30 = 270 (Maximum 30 × 15 × 25 / 30 = 375)
+  // Prüfungen 3 × (9 + 10 + 8 + 11) = 114, fpA 12 + 12 = 24
+  // E = 114 + 24 + 270 = 408, M = 4 × 45 + 30 + 375 = 585
+  // S = 17/3 − 5 × 408 / 585 = 5,6667 − 3,4872 = 2,1795 -> 2,1
+  eq('aus: E/M/S', [rAus.E, rAus.M, rAus.S], [408, 585, 2.1]);
+  // Gesamtergebnis Geschichte über alle Halbjahre: (5 + 11) / 2 = 8
+  eq('aus: GE Geschichte über alle HJ', rAus.gesamtergebnisse.find((g) => g.fachId === t.by('Geschichte').id).punkte, 8);
+  eq('aus: vorläufig bestanden', [rAus.vollstaendig, rAus.vorlaeufig, rAus.ergebnis], [true, true, 'vorläufig bestanden']);
+  // Dasselbe mit „Streichen“ an: die 5 fällt weg, E = 114 + 24 + 25 × 11 = 413, endgültig
+  const rEin = C.fachabitur(ein(t.st));
+  eq('ein: Geschichte 11/1 gestrichen', [gestrichenIn(rEin, t.by('Geschichte')), rEin.E, rEin.S, rEin.vorlaeufig, rEin.ergebnis], [['11_1'], 413, 2.1, false, 'bestanden']);
+
+  // Krummes Beispiel ohne Zwischenrundung: Technik mit einer 3 (fs[4] 12/1)
+  // Summe HJ = 29 × 11 + 3 = 322; HJ-Teil = 322 × 25 / 30 = 268,333…; E = 138 + 268,333… = 406,333…
+  // S = 17/3 − 5 × 406,333… / 585 = 5,6667 − 3,4729 = 2,1937 -> 2,1
+  const rAusKrumm = C.fachabitur(st);
+  eq('aus krumm: E als Kommazahl', [nah(rAusKrumm.E, 138 + (322 * 25) / 30), rAusKrumm.M, rAusKrumm.S], [true, 585, 2.1]);
+
+  // Teilstand im Modus 'aus': nur Deutsch 12/1 = 10 und die schriftliche Prüfung Deutsch = 9
+  // Jedes Halbjahr zählt 25/30: E = 3 × 9 + 10 × 25/30 = 27 + 8,333… = 35,333…; M = 45 + 15 × 25/30 = 57,5
+  // S = 17/3 − 5 × 35,333… / 57,5 = 5,6667 − 3,0725 = 2,5942 -> 2,5
+  // Rest: 29 offene HJ × 15 × 25/30 = 362,5 + 3 Prüfungen × 45 + fpA 30 = 527,5; M + Rest = 585
+  const teilAus = P.faecherFuer('technik', 12, nov2026);
+  const deutschT = teilAus.find((f) => f.name === 'Deutsch');
+  deutschT.zeugnis = { '12_1': 10 };
+  deutschT.pruefung = { schriftlich: 9 };
+  const rTeilAus = C.fachabitur({ faecher: teilAus, fpa: {} });
+  eq('aus Teilstand: nichts gestrichen', anzahlGestrichen(rTeilAus), 0);
+  eq('aus Teilstand: E/M/S', [nah(rTeilAus.E, 27 + 250 / 30), rTeilAus.M, rTeilAus.S], [true, 57.5, 2.5]);
+  eq('aus Teilstand: Rest', [rTeilAus.restMax, rTeilAus.M + rTeilAus.restMax], [527.5, 585]);
+  eq('aus Teilstand: unvollständig', [rTeilAus.ergebnis, rTeilAus.vorlaeufig], ['unvollständig', true]);
+
+  // k im Modus 'aus': zählt nicht mit (auch nicht als 0) und wird nicht gestrichen
+  t = technik((by) => { by('Chemie').zeugnis['12_1'] = 'k'; });
+  r2 = C.fachabitur(t.st);
+  const chemieK = r2.kandidaten.find((k) => k.fachId === t.by('Chemie').id && k.hj === '12_1');
+  eq('aus k: nicht gestrichen', [chemieK.k, chemieK.gestrichen, anzahlGestrichen(r2)], [true, false, 0]);
+  // 29 zählbare HJ: HJ-Teil = 29 × 11 × 25 / 29 = 275, E = 138 + 275 = 413 (als 0 gezählt wären es 138 + 319 × 25/30 = 403,83)
+  eq('aus k: ausgeschlossen, nicht 0', [r2.eingebrachtAnzahl, r2.zaehlbarHj, r2.E, r2.M], [29, 29, 413, 585]);
+  eq('aus k: GE Chemie ohne k', r2.gesamtergebnisse.find((g) => g.fachId === t.by('Chemie').id).punkte, 11);
+  eq('aus k: lässt sich streichen', [r2.kOffen, r2.ergebnis, r2.bestehen.some((b) => b.ok && b.text.includes('lässt sich streichen'))], [0, 'vorläufig bestanden', true]);
+  // zu viele k auch im Modus 'aus' erkannt
+  t = technik((by) => { ['Deutsch', 'Englisch', 'Mathematik', 'Physik', 'Chemie', 'Geschichte'].forEach((n) => { by(n).zeugnis[n === 'Geschichte' ? '11_1' : '12_1'] = 'k'; }); });
+  r2 = C.fachabitur(t.st);
+  eq('aus 6 k: vorläufig nicht bestanden', [r2.kOffen, r2.ergebnis, anzahlGestrichen(r2)], [1, 'vorläufig nicht bestanden', 0]);
+
+  // Vorläufig-Kennzeichen: nie endgültig „bestanden“ im Modus 'aus'
+  eq('vorläufig: aus/ein', [C.fachabitur(technik().st).vorlaeufig, C.fachabitur(ein(technik().st)).vorlaeufig], [true, false]);
+  const rNichtAus = C.fachabitur(technik((by) => { by('Physik').pruefung = { schriftlich: 0 }; by('Mathematik').pruefung = { schriftlich: 1 }; }).st);
+  eq('vorläufig nicht bestanden (Prüfungen)', rNichtAus.ergebnis, 'vorläufig nicht bestanden');
+  eq('aus: nie endgültig bestanden', ['bestanden', 'nicht bestanden'].includes(rAus.ergebnis), false);
+
+  // Migration: 'auto' -> 'aus', 'manuell' -> 'ein' mit Auswahl und behalten
+  const alt = { streichModus: { fachabi: 'auto', abitur: 'manuell' }, gestrichen: { fachabi: { a: '12_1' }, abitur: { b: '13_1', kaputt: 3 } }, behalten: { abitur: { c: true, d: 'ja' } } };
+  eq('Migration', C.streichDatenNormalisieren(alt), {
+    streichModus: { fachabi: 'aus', abitur: 'ein' },
+    gestrichen: { fachabi: { a: '12_1' }, abitur: { b: '13_1' } },
+    behalten: { fachabi: {}, abitur: { c: true } },
+  });
+  // Alter Stand 'manuell' mit Auswahl rechnet wie 'ein' mit Auswahl
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
+  const altManuell = { ...t.st, streichModus: { fachabi: 'manuell' }, gestrichen: { fachabi: { [t.by('Deutsch').id]: '12_2' } } };
+  const neuManuell = { ...altManuell, ...C.streichDatenNormalisieren(altManuell) };
+  r2 = C.fachabitur(neuManuell);
+  eq('Migration manuell: Wahl bleibt', [neuManuell.streichModus.fachabi, r2.streichModus, gestrichenIn(r2, t.by('Deutsch')), wahlIn(r2, t.by('Deutsch')), r2.manuellAnzahl], ['ein', 'ein', ['12_2'], ['manuell'], 1]);
+  eq('Migration auto: nichts gestrichen', anzahlGestrichen(C.fachabitur({ ...t.st, ...C.streichDatenNormalisieren({ streichModus: { fachabi: 'auto' } }) })), 0);
+
+  // 'ein' ohne Wahl = der frühere automatische Vorschlag (alle Streichungen gestrichelt, Tausch-Tipp möglich)
+  r2 = C.fachabitur(ein(t.st));
+  eq('ein ohne Wahl: alles Vorschlag', [anzahlGestrichen(r2), r2.manuellAnzahl, r2.kandidaten.filter((k) => k.gestrichen && k.wahl === 'auto').length, r2.E, gestrichenIn(r2, t.by('Technologie'))], [5, 0, 5, 413, ['12_1']]);
+  t = technik((by) => {
+    by('Geschichte').zeugnis['11_1'] = 10;
+    for (const n of ['Politik und Gesellschaft', 'Religionslehre/Ethik', 'Wahlpflichtfach 1', 'Wahlpflichtfach 2']) by(n).zeugnis['12_1'] = 10;
+    by('Chemie').zeugnis = { '11_2': 11, '12_1': 13, '12_2': 13 };
+  });
+  eq('Tausch nur ohne eigene Wahl', [C.fachabitur(ein(t.st)).tausch.length, C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_1' })).tausch.length, C.fachabitur(t.st).tausch.length], [1, 0, 0]);
+
+  // Zeilenreihenfolge des Streichvorschlag-Tools der FOS als letzter Tiebreak
+  const rangNamen = (fx, richtung) => {
+    const rang = C.toolRang(fx, richtung);
+    return fx.filter((f) => f.einbringbar !== false).slice().sort((a, b) => rang[a.id] - rang[b.id]).map((f) => f.name);
+  };
+  eq('Tool-Rang Technik (GTAG)', rangNamen(P.faecherFuer('technik', 12, nov2026), 'technik'),
+    ['Religionslehre/Ethik', 'Deutsch', 'Englisch', 'Geschichte', 'Politik und Gesellschaft', 'Mathematik', 'Physik', 'Chemie', 'Mathematik Additum', 'Technologie', 'Wahlpflichtfach 1', 'Wahlpflichtfach 2']);
+  eq('Tool-Rang ABU ohne richtung (aus Profilfach 1)', rangNamen(P.faecherFuer('abu', 12, nov2026)).slice(6, 10), ['Biologie', 'Chemie', 'Technologie', 'Physik']);
+  eq('Tool-Rang Gesundheit', rangNamen(P.faecherFuer('gesundheit', 12, nov2026), 'gesundheit').slice(6, 10), ['Gesundheitswissenschaften', 'Chemie', 'Biologie', 'Kommunikation und Interaktion']);
+  eq('Tool-Rang Gestaltung', rangNamen(P.faecherFuer('gestaltung', 12, nov2026), 'gestaltung').slice(6, 10), ['Gestaltung Praxis', 'Gestaltung Theorie', 'Naturwissenschaften', 'Medien']);
+  eq('Tool-Rang Wirtschaft (SWW, alte Namen)', rangNamen(P.faecherFuer('wirtschaft', 12, nov2026), 'wirtschaft').slice(6, 11), ['BwR (Betriebswirtschaftslehre mit Rechnungswesen)', 'Volkswirtschaftslehre', 'Rechtslehre', 'Naturwissenschaften', 'Informatik']);
+  eq('Tool-Rang Wirtschaft (neue Namen)', rangNamen(P.faecherFuer('wirtschaft', 11, nov2026), 'wirtschaft').slice(6, 11), ['BWL', 'Volkswirtschaftslehre', 'Rechtslehre', 'Naturwissenschaften', 'KIWI (KI und Wirtschaftsinformatik)']);
+  const fxEigen = P.faecherFuer('sozial', 12, nov2026);
+  fxEigen.unshift({ ...P.leeresFach('Schach', 0), wpf: false });
+  fxEigen.push({ ...P.leeresFach('Astronomie', 1), wpf: false });
+  eq('Tool-Rang: eigene Fächer zuletzt, in App-Reihenfolge', rangNamen(fxEigen, 'sozial').slice(-4), ['Wahlpflichtfach 1', 'Wahlpflichtfach 2', 'Schach', 'Astronomie']);
+
+  // Fälle aus dem Abgleich mit dem Tool (Technik, WPF Informatik und Internationale Politik)
+  const KURZ = { de: 'Deutsch', en: 'Englisch', ma: 'Mathematik', ph: 'Physik', tec: 'Technologie', ch: 'Chemie', madd: 'Mathematik Additum', ge: 'Geschichte', pug: 'Politik und Gesellschaft', rel: 'Religionslehre/Ethik', sp: 'Sport', wpf1: 'Wahlpflichtfach 1', wpf2: 'Wahlpflichtfach 2' };
+  const WPF_NAME = { wpf1: 'Informatik', wpf2: 'Internationale Politik' };
+  function toolFall(grades, exams, fpa) {
+    const fx = P.faecherFuer('technik', 12, nov2026);
+    const kurz = {};
+    for (const f of fx) {
+      const k = Object.keys(KURZ).find((x) => KURZ[x] === f.name);
+      kurz[f.id] = k;
+      if (WPF_NAME[k]) f.name = WPF_NAME[k];
+      f.zeugnis = { ...(grades[k] || {}) };
+      if (exams[k]) f.pruefung = { schriftlich: exams[k][0], muendlich: exams[k][1] };
+    }
+    const r = C.fachabitur({ faecher: fx, fpa: { '11_1': { ergebnis: fpa[0] }, '11_2': { ergebnis: fpa[1] } }, streichModus: { fachabi: 'ein' }, gestrichen: { fachabi: {} }, behalten: { fachabi: {} } });
+    r.streich = r.kandidaten.filter((k) => k.gestrichen).map((k) => `${kurz[k.fachId]} ${k.hj}`).sort();
+    return r;
+  }
+  const hj3 = (a, b, c) => ({ '11_2': a, '12_1': b, '12_2': c });
+  const hj12 = (a, b) => ({ '12_1': a, '12_2': b });
+  const gleichmaessig = (w, anders) => ({
+    de: hj3(w, w, w), en: hj3(w, w, w), ma: hj3(w, w, w), ph: hj3(w, w, w), tec: hj3(w, w, w), ch: hj3(2, 2, 2),
+    madd: hj12(w, w), ge: { '11_1': w, '11_2': w }, pug: hj12(w, w), rel: hj12(w, w), sp: hj12(14, 14), wpf1: hj12(w, w), wpf2: hj12(w, w), ...anders,
+  });
+  const ap = (w, de = w) => ({ de: [de, null], en: [w, w], ma: [w, null], ph: [w, null] });
+  const beispiel = {
+    de: hj3(8, 7, 9), en: hj3(6, 5, 7), ma: hj3(10, 11, 12), ph: hj3(12, 13, 11), tec: hj3(9, 10, 10), ch: hj3(4, 3, 3),
+    madd: hj12(9, 8), ge: { '11_1': 7, '11_2': 8 }, pug: hj12(10, 9), rel: hj12(11, 12), sp: hj12(14, 14), wpf1: hj12(13, 14), wpf2: hj12(10, 11),
+  };
+  const apBeispiel = { de: [7, null], en: [6, 8], ma: [11, null], ph: [10, null] };
+
+  // 2a: rel {0, 9} und ge {0, 9} gleichwertig, das Tool streicht Religion (Zeile 8 vor 11)
+  let rf = toolFall({ ...beispiel, ch: hj3(5, 1, 4), madd: hj12(0, 10), ge: { '11_1': 0, '11_2': 9 }, pug: hj12(0, 10), rel: hj12(0, 9), wpf1: hj12(0, 12), wpf2: hj12(0, 12) }, apBeispiel, [11, 12]);
+  eq('Tool 2a: Streichungen wie Tool', [rf.E, rf.S, rf.ergebnis, rf.streich], [340, 2.7, 'bestanden', ['madd 12_1', 'pug 12_1', 'rel 12_1', 'wpf1 12_1', 'wpf2 12_1']]);
+  // 3a/3b: lauter 5er, das Tool nimmt die obersten Zeilen (D, E, Gesch, PuG)
+  rf = toolFall(gleichmaessig(5, { rel: hj12(8, 8) }), ap(5), [5, 5]);
+  eq('Tool 3a: Streichungen wie Tool', [rf.E, rf.ergebnis, rf.streich], [195, 'bestanden', ['ch 11_2', 'de 11_2', 'en 11_2', 'ge 11_1', 'pug 12_1']]);
+  rf = toolFall(gleichmaessig(5, { rel: hj12(8, 7) }), ap(5), [5, 5]);
+  eq('Tool 3b: Streichungen wie Tool', [rf.E, rf.ergebnis, rf.streich], [194, 'nicht bestanden', ['ch 11_2', 'de 11_2', 'en 11_2', 'ge 11_1', 'pug 12_1']]);
+  // 3c/3d: lauter 6er, Religion steht vor allen anderen
+  rf = toolFall(gleichmaessig(6, { madd: hj12(2, 2), wpf1: hj12(11, 11), wpf2: hj12(7, 7) }), ap(6), [6, 6]);
+  eq('Tool 3c: Streichungen wie Tool', [rf.E, rf.ergebnis, rf.streich], [234, 'bestanden', ['ch 11_2', 'de 11_2', 'en 11_2', 'madd 12_1', 'rel 12_1']]);
+  rf = toolFall(gleichmaessig(6, { madd: hj12(2, 2), wpf1: hj12(11, 11), wpf2: hj12(7, 6) }), ap(6), [6, 6]);
+  eq('Tool 3d: Streichungen wie Tool', [rf.E, rf.ergebnis, rf.streich], [233, 'nicht bestanden', ['ch 11_2', 'de 11_2', 'madd 12_1', 'rel 12_1', 'wpf2 12_2']]);
+  // 6: Deutsch geschützt, übrige 5er nach Zeilen (E, Gesch, PuG, M)
+  rf = toolFall(gleichmaessig(5, { rel: hj12(12, 12), wpf1: hj12(12, 12), wpf2: hj12(12, 12) }), ap(5, 2), [5, 5]);
+  eq('Tool 6: Streichungen wie Tool', [rf.E, rf.ergebnis, rf.streich], [222, 'bestanden', ['ch 11_2', 'en 11_2', 'ge 11_1', 'ma 11_2', 'pug 12_1']]);
+  // 5c: sechsmal k, nur fünf Streichungen: Urteil und E wie im Tool (welches k übrig bleibt, entscheidet das Tool anders)
+  rf = toolFall({ ...beispiel, de: hj3(8, 'k', 9), madd: hj12('k', 8), pug: hj12('k', 9), rel: hj12('k', 12), wpf1: hj12('k', 14), wpf2: hj12('k', 11) }, apBeispiel, [11, 12]);
+  eq('Tool 5c: E und Urteil wie Tool', [rf.E, rf.S, rf.ergebnis, rf.kOffen, rf.streich.length], [340, 2.7, 'nicht bestanden', 1, 5]);
+
+  // Kein gesamtergebnisoptimierter Vorschlag bei nicht bestandenem Stand (Tool: keiner; früher E 187 -> 185)
+  rf = toolFall({
+    de: hj3(7, 7, 6), en: hj3(7, 2, 2), ma: hj3(4, 8, 5), ph: hj3(2, 1, 4), tec: hj3(8, 7, 7), ch: hj3(4, 1, 2),
+    madd: hj12(7, 4), ge: { '11_1': 5, '11_2': 1 }, pug: hj12(5, 2), rel: hj12(4, 3), sp: hj12(6, 8), wpf1: hj12(4, 5), wpf2: hj12(1, 1),
+  }, { de: [0, 13], en: [8, 4], ma: [3, null], ph: [6, null] }, [5, 2]);
+  eq('Tool R04: kein Tausch', [rf.tausch, rf.E, rf.ergebnis], [[], 187, 'nicht bestanden']);
+  // R18: früher Tausch mit E 233 -> 232
+  rf = toolFall({
+    de: hj3(5, 7, 2), en: hj3(7, 4, 7), ma: hj3(3, 3, 9), ph: hj3(5, 5, 5), tec: hj3(7, 6, 9), ch: hj3(9, 8, 2),
+    madd: hj12(3, 1), ge: { '11_1': 8, '11_2': 7 }, pug: hj12(2, 2), rel: hj12(3, 9), sp: hj12(6, 3), wpf1: hj12(5, 2), wpf2: hj12(2, 4),
+  }, { de: [1, 7], en: [4, 11], ma: [9, null], ph: [9, null] }, [5, 5]);
+  eq('Tool R18: kein Tausch', [rf.tausch, rf.E, rf.ergebnis], [[], 233, 'nicht bestanden']);
+
+  // Abitur im Modus 'aus': 18 Halbjahre in 13, Chemie 13/1 = 2, sonst 11
+  // Summe HJ = 17 × 11 + 2 = 189; HJ-Teil = 189 × 16 / 18 = 168; E = 2 × 38 + 2 × 11 + 168 = 266, M = 390
+  // S = 17/3 − 5 × 266 / 390 = 5,6667 − 3,4103 = 2,2564 -> 2,2
+  const rAbiAus = C.abitur(stJ);
+  eq('Abitur aus: Modus, nichts gestrichen', [rAbiAus.streichModus, anzahlGestrichen(rAbiAus), chemieAbi(rAbiAus)], ['aus', 0, []]);
+  eq('Abitur aus: E/M/S', [rAbiAus.zaehlbarHj, rAbiAus.E, rAbiAus.M, rAbiAus.S], [18, 266, 390, 2.2]);
+  eq('Abitur aus: vorläufig', [rAbiAus.vorlaeufig, rAbiAus.ergebnis], [true, 'vorläufig bestanden']);
+  // 'ein' ohne Wahl: die 2 und eine 11 fallen weg, E = 76 + 22 + 16 × 11 = 274
+  const rAbiEin = C.abitur(ein(stJ, 'abitur'));
+  eq('Abitur ein ohne Wahl', [rAbiEin.E, rAbiEin.S, rAbiEin.manuellAnzahl, anzahlGestrichen(rAbiEin), rAbiEin.ergebnis], [274, 2.1, 0, 2, 'bestanden']);
+  eq('Abitur: Standard aus, Fachabi unberührt', [C.abitur(stAbi).streichModus, C.fachabitur(ein(stJ, 'abitur')).streichModus], ['aus', 'aus']);
 
   log(`${ok} Tests bestanden, ${fail} fehlgeschlagen`);
   if (fail && isNode) process.exitCode = 1;
