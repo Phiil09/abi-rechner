@@ -57,6 +57,8 @@
     return `<span class="pill ${leer ? 'p-leer' : 'farbig'}${gross ? ' gross' : ''}" style="${hStyle(p)}">${leer ? '–' : p}${note}</span>`;
   }
 
+  const kPill = (gross = false) => `<span class="pill p-leer${gross ? ' gross' : ''}" title="keine Note möglich">k</span>`;
+
   // ---------- Zustand ----------
   function neuerState() {
     return {
@@ -74,12 +76,22 @@
     };
   }
 
+  const STREICH = ['auto', 'ja', 'nein'];
+  const STREICH_LABEL = { auto: 'auto', ja: 'streichen', nein: 'behalten' };
+  // Alte Sicherungen kennen kein Feld streichen: dann gilt 'auto'.
+  const fachNormalisieren = (f) => ({
+    ...f,
+    streichen: STREICH.includes(f.streichen) ? f.streichen : 'auto',
+    streichenAbi: STREICH.includes(f.streichenAbi) ? f.streichenAbi : 'auto',
+  });
+
   function normalisieren(d) {
     const n = neuerState();
     const e = d.einstellungen || {};
     const res = {
       ...n,
       ...d,
+      faecher: (d.faecher || []).map(fachNormalisieren),
       fpa: { '11_1': {}, '11_2': {}, ...(d.fpa || {}) },
       seminar: d.seminar || {},
       zweiteFS: d.zweiteFS || { modus: 'keine' },
@@ -169,14 +181,14 @@
   // ---------- Ansicht: Fächer ----------
   function fachKarte(f, r, hj) {
     const n = (f.noten || []).filter((x) => x.hj === hj).length;
-    const sub = r.quelle === 'zeugnis' ? 'Zeugniswert' : n ? `${n} ${n === 1 ? 'Note' : 'Noten'}` : 'Noch keine Noten';
+    const sub = r.k ? 'Keine Note (k)' : r.quelle === 'zeugnis' ? 'Zeugniswert' : n ? `${n} ${n === 1 ? 'Note' : 'Noten'}` : 'Noch keine Noten';
     const pruef = hj.startsWith('13') ? f.pruefungsfachAbi : f.pruefungsfach;
     const tags = (pruef ? '<span class="tag">Prüfung</span>' : '') + (f.wpf ? '<span class="tag">WPF</span>' : '') + (f.einbringbar === false ? '<span class="tag grau">zählt nicht</span>' : '');
     return `
       <button class="fach-karte" data-action="fach-oeffnen" data-id="${esc(f.id)}" style="--fach:${esc(f.farbe)}">
         <span class="fach-farbe" aria-hidden="true"></span>
         <span class="fach-text"><span class="fach-name">${esc(f.name)}</span><span class="fach-sub">${sub}${tags}</span></span>
-        ${pill(r.punkte, true)}
+        ${r.k ? kPill(true) : pill(r.punkte, true)}
       </button>`;
   }
 
@@ -211,6 +223,7 @@
 
   // ---------- Ansicht: Fach ----------
   function erklaerung(f, r, hj) {
+    if (r.k) return 'Für dieses Halbjahr ist <b>keine Note</b> möglich (k). Es wird beim Fachabitur gestrichen.';
     if (r.quelle === 'zeugnis') {
       return `Zeugniswert eingetragen: <b>${r.punkte} Punkte</b>${r.berechnet !== null ? ` (aus deinen Noten berechnet: ${r.berechnet})` : ''}.`;
     }
@@ -256,7 +269,7 @@
     const brauchtSa = Calc.naechsteNoteFuer(f, hj, ziel, 'sa');
     const brauchtKlein = Calc.naechsteNoteFuer(f, hj, ziel, 'klein', 1);
     const zielText = (y, was) => (y === null ? `${was}: nicht mehr erreichbar` : y === 0 ? `${was}: Ziel ist schon sicher` : `${was}: mindestens <b>${y} Punkte</b> (${Calc.noteAusPunkten(y)})`);
-    const zeugnisWert = f.zeugnis && f.zeugnis[hj] !== undefined && f.zeugnis[hj] !== null ? f.zeugnis[hj] : '';
+    const zeugnisWert = !r.k && f.zeugnis && f.zeugnis[hj] !== undefined && f.zeugnis[hj] !== null ? f.zeugnis[hj] : '';
 
     return `
       <div class="fach-kopf">
@@ -267,7 +280,7 @@
       <section class="card ergebnis-fach${r.punkte === null ? '' : ' flaeche'}" style="${hStyle(r.punkte)}">
         <div class="ergebnis-zeile">
           <div><div class="kachel-label">Halbjahresergebnis ${Calc.HJ_LABEL[hj]}</div><div class="erklaerung">${erklaerung(f, r, hj)}</div></div>
-          ${pill(r.punkte, true)}
+          ${r.k ? kPill(true) : pill(r.punkte, true)}
         </div>
       </section>
 
@@ -291,8 +304,10 @@
         <h3>Zeugniswert</h3>
         <p class="hinweis">Steht im Zeugnis ein anderer Wert, etwa weil die Lehrkraft anders gewichtet hat? Trag ihn hier ein. Er ersetzt dann die Berechnung.</p>
         <label class="feld inline">Punkte ${Calc.HJ_LABEL[hj]}
-          <input type="number" min="0" max="15" inputmode="numeric" placeholder="leer = berechnen" data-bind="zeugnis" data-id="${esc(f.id)}" data-hj="${hj}" value="${esc(zeugnisWert)}">
+          <input type="number" min="0" max="15" inputmode="numeric" placeholder="leer = berechnen" data-bind="zeugnis" data-id="${esc(f.id)}" data-hj="${hj}" value="${esc(zeugnisWert)}" ${r.k ? 'disabled' : ''}>
         </label>
+        <label class="schalter"><input type="checkbox" data-bind="zeugnis-k" data-id="${esc(f.id)}" data-hj="${hj}" ${r.k ? 'checked' : ''}> Keine Note möglich (k), z. B. nach langer Krankheit</label>
+        ${r.k ? '<p class="hinweis">Ein k-Halbjahr muss gestrichen werden. Gibt es mehr k-Halbjahre als Streichungen (höchstens eine je Fach), ist das Fachabitur nicht bestanden.</p>' : ''}
       </section>`;
   }
 
@@ -350,18 +365,18 @@
         const at = `data-hj="${hj}"`;
         return `
           <div class="pruef-zeile fpa">
-            <span class="pruef-name">Praktikum ${Calc.HJ_LABEL[hj]}</span>
-            ${eingabe('fpa', `${at} data-teil="anleitung"`, d.anleitung, 'Anleitung')}
-            ${eingabe('fpa', `${at} data-teil="vertiefung"`, d.vertiefung, 'Vertiefung')}
-            ${eingabe('fpa', `${at} data-teil="praktikum"`, d.praktikum, 'Praktikum')}
-            ${eingabe('fpa', `${at} data-teil="ergebnis"`, d.ergebnis, 'oder Zeugnis')}
+            <span class="pruef-name">fpA ${Calc.HJ_LABEL[hj]}</span>
+            ${eingabe('fpa', `${at} data-teil="ergebnis"`, d.ergebnis, 'Ergebnis')}
+            ${eingabe('fpa', `${at} data-teil="anleitung"`, d.anleitung, 'oder Anl.')}
+            ${eingabe('fpa', `${at} data-teil="vertiefung"`, d.vertiefung, 'Vertief.')}
+            ${eingabe('fpa', `${at} data-teil="praktikum"`, d.praktikum, 'Prakt.')}
             ${pill(r.punkte)}
           </div>`;
       }).join('');
       extraKarten = `
         <section class="card">
           <h3>Fachpraktische Ausbildung <span class="zahl">max. 30</span></h3>
-          <p class="hinweis">Je Halbjahr: (Anleitung + Vertiefung + 2 × Praktikum) / 4, gerundet (§ 13 Abs. 2). Oder trag einfach die Zeugnisnote ein.</p>
+          <p class="hinweis">Trag je Halbjahr das Ergebnis aus dem Zeugnis ein. Oder lass es aus Anleitung + Vertiefung + 2 × Praktikum (geteilt durch 4, gerundet, § 13 Abs. 2) berechnen. Die fpA-Gesamtnote (Mittel beider Halbjahre) zählt bei den Unterpunktungen mit.</p>
           ${fpaRows}
         </section>`;
     } else {
@@ -397,16 +412,27 @@
     }
 
     const slotsVon = abi ? Calc.einbringbareHalbjahreAbitur : Calc.einbringbareHalbjahre;
+    const streichFeld = abi ? 'streichenAbi' : 'streichen';
     const einbringRows = state.faecher.filter((f) => slotsVon(f).length).map((f) => {
       const chips = slotsVon(f).map((hj) => {
         const k = a.kandidaten.find((x) => x.fachId === f.id && x.hj === hj);
-        const cls = !k ? 'offen' : k.gestrichen ? 'gestrichen' : 'farbig';
-        return `<span class="hj-chip ${cls}" style="${k && !k.gestrichen ? hStyle(k.punkte) : ''}" title="${Calc.HJ_LABEL[hj]}${k && k.gestrichen ? ' (gestrichen)' : ''}"><small>${Calc.HJ_LABEL[hj]}</small>${k ? k.punkte : '–'}</span>`;
+        const cls = !k ? 'offen' : k.gestrichen ? 'gestrichen' : k.k ? 'offen k-offen' : 'farbig';
+        const titel = `${Calc.HJ_LABEL[hj]}${k && k.k ? ' (keine Note)' : ''}${k && k.gestrichen ? ' (gestrichen)' : ''}`;
+        return `<span class="hj-chip ${cls}" style="${k && !k.gestrichen && !k.k ? hStyle(k.punkte) : ''}" title="${titel}"><small>${Calc.HJ_LABEL[hj]}</small>${k ? (k.k ? 'k' : k.punkte) : '–'}</span>`;
       }).join('');
       const ge = a.gesamtergebnisse.find((g) => g.fachId === f.id);
       const pruef = abi ? f.pruefungsfachAbi : f.pruefungsfach;
-      return `<div class="einbring-zeile"><span class="pruef-name">${name(f.id)}${pruef ? ` <span class="tag">P ×${a.faktor}</span>` : ''}</span><span class="hj-chips">${chips}</span>${pill(ge ? ge.punkte : null)}</div>`;
+      const wahl = f[streichFeld] || 'auto';
+      const wahlSelect = `<select class="streich-wahl${wahl !== 'auto' ? ' gesetzt' : ''}" data-bind="streichen" data-feld="${streichFeld}" data-id="${esc(f.id)}" aria-label="Streichen ${name(f.id)}" title="Halbjahr streichen: auto = App entscheidet, streichen = erzwingen, behalten = möglichst nicht">${STREICH.map((w) => `<option value="${w}" ${w === wahl ? 'selected' : ''}>${STREICH_LABEL[w]}</option>`).join('')}</select>`;
+      return `<div class="einbring-zeile"><span class="pruef-name">${name(f.id)}${pruef ? ` <span class="tag">P ×${a.faktor}</span>` : ''}</span><span class="hj-chips">${chips}</span>${wahlSelect}${pill(ge ? ge.punkte : null)}</div>`;
     }).join('');
+    const hjText = (id, hj) => `${name(id)} ${Calc.HJ_LABEL[hj]}`;
+    const tauschHtml = a.tausch && a.tausch.length ? `
+        <div class="tipp">
+          <b>Tipp für bessere Gesamtergebnisse:</b>
+          <ul>${a.tausch.map((x) => `<li>Streiche ${hjText(x.fachId, x.hj)} statt ${hjText(x.stattFachId, x.stattHj)}: ${name(x.fachId)} steigt von ${x.gePunkteVorher} auf ${x.gePunkteNachher} Punkte (${esc(Calc.notenstufe(Calc.stufeAusPunkten(x.gePunkteNachher)))}). Das kostet ${x.punkteVerlust} ${x.punkteVerlust === 1 ? 'Punkt' : 'Punkte'}, der Schnitt bleibt gleich.</li>`).join('')}</ul>
+          <small>Umsetzen: beim einen Fach „streichen“, beim anderen „behalten“ wählen.</small>
+        </div>` : '';
     const gestrichen = a.kandidaten.filter((k) => k.gestrichen).length;
     const zielOptionen = [1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 2.8, 3.0, 3.3, 3.5, 4.0];
 
@@ -440,14 +466,18 @@
 
       <section class="card">
         <h3>Einbringung <span class="zahl">${a.eingebrachtAnzahl}/${a.anzahlHj}</span></h3>
-        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2. Bei Fächern, die in der 11. Klasse enden, zählt auch 11/1.'} Die App streicht automatisch die ${a.zuStreichen} schlechtesten erlaubten Halbjahre, höchstens eins pro Fach. Gestrichen wird erst, wenn alle Halbjahre eines Fachs feststehen${gestrichen < a.zuStreichen ? ` (bisher ${gestrichen})` : ''}. Rechts steht das Gesamtergebnis des Fachs.</p>
+        <p class="hinweis">${abi ? 'Es zählen 16 Halbjahre aus 13/1 und 13/2.' : 'Es zählen 25 Halbjahre aus 11/2, 12/1 und 12/2. Bei Fächern, die in der 11. Klasse enden, zählt auch 11/1.'} Die App streicht ${a.zuStreichen} Halbjahre, höchstens eins pro Fach: zuerst Halbjahre ohne Note (k), dann Fächer auf „streichen“, dann Streichungen, die ein Gesamtergebnis unter 4 Punkten retten (wenn das fürs Bestehen nötig ist), sonst die niedrigsten Punkte. „behalten“ wird nur gestrichen, wenn es nicht anders geht. Gestrichen wird erst, wenn alle Halbjahre eines Fachs feststehen${gestrichen < a.zuStreichen ? ` (bisher ${gestrichen})` : ''}. Rechts steht das Gesamtergebnis des Fachs.</p>
         ${einbringRows}
         ${abi ? '' : `<div class="einbring-zeile"><span class="pruef-name">Fachpraktische Ausbildung</span><span class="hj-chips"></span>${pill(a.fpaGesamt)}</div>`}
+        ${tauschHtml}
       </section>
 
       <section class="card">
         <h3>Bestehen ${a.vollstaendig ? '' : '<span class="zahl">vorläufig</span>'}</h3>
+        <p class="status ${a.ergebnis === 'bestanden' ? 'ok' : a.ergebnis === 'nicht bestanden' ? 'nein' : ''}">${a.ergebnis === 'bestanden' ? 'BESTANDEN' : a.ergebnis === 'nicht bestanden' ? 'NICHT BESTANDEN' : 'Eingaben unvollständig'}</p>
+        ${a.hinweise.length && a.ergebnis === 'unvollständig' ? `<ul class="hinweis-liste">${a.hinweise.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}
         <ul class="check-liste">${a.bestehen.map((b) => `<li class="${b.ok ? 'ok' : 'nein'}">${b.ok ? '✓' : '✗'} ${esc(b.text)}</li>`).join('')}</ul>
+        <p class="hinweis">Unter 4 Punkten zählt als Unterpunktung, 0 Punkte zählen doppelt (§ 35 Abs. 9).</p>
       </section>`;
   }
 
@@ -592,12 +622,14 @@
         <h3>So rechnet die App</h3>
         <ul>
           <li><b>Halbjahresergebnis</b> (§ 21): Jede Schulaufgabe zählt so viel wie der gewichtete Schnitt aller kleinen Noten zusammen. Gerundet wird erst am Ende auf ganze Punkte, ab ,5 auf. Werte unter 1 ergeben 0 Punkte (§ 19 Abs. 6).</li>
-          <li><b>Prüfung</b> (§ 35 Abs. 2): (2 × schriftlich + mündlich) / 3, gerundet. Fachabi: zählt dreifach. Abitur: zählt doppelt.</li>
+          <li><b>Prüfung</b> (§ 35 Abs. 2): (2 × schriftlich + mündlich) / 3, gerundet; unter 1 ergibt 0. Ohne mündliche zählt die schriftliche. Fachabi: zählt dreifach, mündlich Englisch ist Pflicht. Abitur: zählt doppelt.</li>
           <li><b>Fachabitur</b> (§ 35 Abs. 5): 4 Prüfungen × 3, fachpraktische Ausbildung (2 Halbjahre) und 25 Halbjahre = 585 Punkte.</li>
+          <li><b>Streichen</b>: höchstens ein Halbjahr je Fach, im Fach das schwächste (bei Gleichstand das frühere). Reihenfolge wie beim Streichvorschlag-Tool der FOS: Halbjahre ohne Note (k), Fächer auf „streichen“, Rettung eines Gesamtergebnisses unter 4 Punkten (wenn fürs Bestehen nötig), dann die niedrigsten Punkte. Fächer auf „behalten“ nur, wenn es nicht anders geht.</li>
+          <li><b>Gesamtergebnis</b> je Fach (für die Unterpunktungen): eingebrachte Halbjahre und Prüfung × 3, erst auf zwei Nachkommastellen, dann auf ganze Punkte gerundet. Die fpA-Gesamtnote zählt mit.</li>
           <li><b>Abitur</b> (§ 35 Abs. 7): 4 Prüfungen × 2, Seminar × 2 und 16 Halbjahre aus der 13. = 390 Punkte (mit 2. Fremdsprache 420).</li>
           <li>Höchstens ein Halbjahr pro Fach darf wegfallen. Sport zählt nicht.</li>
           <li><b>Schnitt</b> (§ 27 Abs. 3): 17/3 − 5 × Punkte / Höchstpunktzahl. Die erste Nachkommastelle wird abgeschnitten, nicht gerundet.</li>
-          <li><b>Bestehen</b> (§ 35 Abs. 9): höchstens 2 Prüfungs- und 2 Gesamtergebnisse unter 4 Punkten, 0 Punkte zählen doppelt, dazu eine Mindestpunktzahl.</li>
+          <li><b>Bestehen</b> (§ 35 Abs. 9): höchstens 2 Prüfungs- und 2 Gesamtergebnisse unter 4 Punkten, 0 Punkte zählen doppelt. Bei einer Unterpunktung im Gesamtergebnis mindestens 195 Punkte, bei zweien mindestens 234. Ein Halbjahr ohne Note (k), das nicht gestrichen werden kann, bedeutet nicht bestanden.</li>
           <li>Ein Fachreferat gibt es ab 01.08.2026 nicht mehr (Verordnung vom 19.06.2026).</li>
         </ul>
         <p class="hinweis">Rechtsgrundlage: FOBOSO, Fassung ab 01.08.2026. Ohne Gewähr. Verbindlich sind die Festsetzungen deiner Schule.</p>
@@ -652,6 +684,8 @@
       </form>`;
   }
 
+  const streichOptionen = (wert) => STREICH.map((w) => `<option value="${w}" ${w === (wert || 'auto') ? 'selected' : ''}>${STREICH_LABEL[w]}</option>`).join('');
+
   function dialogFach(fach) {
     const g = fach.gewichtung || { modus: 'fobos', saAnteil: 50 };
     const jg = fach.jahrgaenge || {};
@@ -683,7 +717,14 @@
         </div>
         <label class="schalter"><input type="checkbox" id="f-pruef" ${fach.pruefungsfach ? 'checked' : ''}> Prüfungsfach Fachabitur (zählt dreifach)</label>
         <label class="schalter" ${zeigeAbi ? '' : 'hidden'}><input type="checkbox" id="f-pruef-abi" ${fach.pruefungsfachAbi ? 'checked' : ''}> Prüfungsfach Abitur (zählt doppelt)</label>
-        <label class="schalter"><input type="checkbox" id="f-einbr" ${fach.einbringbar !== false ? 'checked' : ''}> Zählt fürs Fachabi/Abitur (Sport z. B. nicht)</label>
+        <label class="schalter"><input type="checkbox" id="f-einbr" ${fach.einbringbar !== false ? 'checked' : ''}> Zählt fürs Fachabi/Abitur (Sport, Kunst, Musik, Studier- und Arbeitstechniken, Szenisches Gestalten nicht)</label>
+        <label class="feld inline">Halbjahr streichen (Fachabi)
+          <select id="f-streichen">${streichOptionen(fach.streichen)}</select>
+        </label>
+        <label class="feld inline" ${zeigeAbi ? '' : 'hidden'}>Halbjahr streichen (Abitur)
+          <select id="f-streichen-abi">${streichOptionen(fach.streichenAbi)}</select>
+        </label>
+        <small class="hinweis">auto: Die App wählt. streichen: Das schwächste Halbjahr dieses Fachs wird auf jeden Fall gestrichen. behalten: Möglichst nichts streichen.</small>
         <label class="schalter"><input type="checkbox" id="f-sa" ${fach.schulaufgaben ? 'checked' : ''}> Fach hat Schulaufgaben</label>
         <div class="feld">Berechnung Halbjahresergebnis
           <select id="f-modus">
@@ -802,6 +843,8 @@
         f.pruefungsfach = $('#f-pruef').checked;
         f.pruefungsfachAbi = $('#f-pruef-abi').checked;
         f.einbringbar = $('#f-einbr').checked;
+        f.streichen = $('#f-streichen').value;
+        f.streichenAbi = $('#f-streichen-abi').value;
         f.schulaufgaben = $('#f-sa').checked;
         f.gewichtung = { modus: $('#f-modus').value, saAnteil: zahlAus($('#f-anteil').value, 0, 100, false) ?? 50 };
         if (!f.pruefungAbi) f.pruefungAbi = { schriftlich: null, muendlich: null };
@@ -943,6 +986,12 @@
       if (w) { $('#f-name').value = w.name; $('#f-einbr').checked = w.e; }
       return;
     }
+    if (el.id === 'f-name') {
+      // Bekannte Wahlpflichtfächer nach Namen einordnen (Kunst, Musik usw. sind nicht einbringungsfähig)
+      const e = Presets.wpfEinbringbar(el.value);
+      if (e !== null && ($('#f-wpf').checked || e === false)) $('#f-einbr').checked = e;
+      return;
+    }
     if (el.id === 'f-jg13') { const l = $('#f-pruef-abi').closest('label'); if (el.checked) l.hidden = false; return; }
     if (el.id === 'import-datei') { importieren(el.files && el.files[0]); el.value = ''; return; }
 
@@ -956,6 +1005,12 @@
         break;
       case 'zeugnis':
         aendern(() => { f.zeugnis = f.zeugnis || {}; f.zeugnis[el.dataset.hj] = zahlAus(el.value, 0, 15); });
+        break;
+      case 'zeugnis-k':
+        aendern(() => { f.zeugnis = f.zeugnis || {}; f.zeugnis[el.dataset.hj] = el.checked ? 'k' : null; });
+        break;
+      case 'streichen':
+        aendern(() => { f[el.dataset.feld === 'streichenAbi' ? 'streichenAbi' : 'streichen'] = STREICH.includes(el.value) ? el.value : 'auto'; });
         break;
       case 'pruef':
         aendern(() => { const k = el.dataset.feld; f[k] = f[k] || {}; f[k][el.dataset.teil] = zahlAus(el.value, 0, 15); });

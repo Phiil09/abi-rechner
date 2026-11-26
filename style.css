@@ -209,6 +209,16 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .check-liste { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .check-liste .ok { color: var(--ok); }
 .check-liste .nein { color: var(--danger); }
+.status { margin: 4px 0 10px; font-weight: 800; letter-spacing: 0.02em; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.nein { color: var(--danger); }
+.hinweis-liste { margin: 0 0 10px; padding-left: 18px; color: var(--muted); font-size: 0.85rem; display: grid; gap: 2px; }
+select.streich-wahl { width: auto; padding: 4px 6px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+select.streich-wahl.gesetzt { color: var(--accent); border-color: var(--accent); }
+.hj-chip.k-offen { color: var(--danger); }
+.tipp { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); font-size: 0.85rem; }
+.tipp ul { margin: 4px 0; padding-left: 18px; display: grid; gap: 4px; }
+.tipp small { color: var(--muted); }
 .info ul { padding-left: 18px; margin: 0; display: grid; gap: 6px; font-size: 0.9rem; }
 
 .chips.scroll { overflow-x: auto; }

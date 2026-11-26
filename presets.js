@@ -10,6 +10,10 @@
  * jg: Jahrgangsstufen, in denen das Fach unterrichtet wird.
  * p: Prüfungsfach Fachabitur; pa: Prüfungsfach Abitur (D, E, M, Profilfach 1).
  * sa: Fach mit Schulaufgaben (Anlage 3). e: einbringungsfähig (Sport nicht).
+ *
+ * Einbringbare Halbjahre (Calc.einbringbareHalbjahre) folgen aus jg und stimmen mit den
+ * Eingabezellen des Streichvorschlag-Tools der FOS überein: Fach in 11 und 12 => 11/2, 12/1, 12/2;
+ * nur 11 => 11/1, 11/2; nur 12 => 12/1, 12/2. Profilfach 3: SWW endet in der 11, GTAG nur in der 12.
  */
 const Presets = (function () {
   const F = (name, jg, opt = {}) => ({
@@ -55,6 +59,22 @@ const Presets = (function () {
     { name: 'Szenisches Gestalten', e: false },
     { name: 'Studier- und Arbeitstechniken', e: false },
   ];
+
+  const namensSchluessel = (n) => String(n || '').toLowerCase().replace(/[^a-zäöüß]/g, '');
+  // Auch die Schreibweise "Studier- uns Arbeitstechniken" (Tippfehler in manchen Listen) erkennen.
+  const NICHT_EINBRINGBAR = new Set(WAHLPFLICHTFAECHER.filter((w) => !w.e).map((w) => namensSchluessel(w.name)).concat([namensSchluessel('Studier- uns Arbeitstechniken')]));
+
+  /**
+   * Einbringungsfähigkeit eines Wahlpflichtfachs nach Namen: false für Kunst, Musik,
+   * Studier- und Arbeitstechniken, Szenisches Gestalten (und Sport), true für bekannte andere
+   * Wahlpflichtfächer, null für unbekannte Namen.
+   */
+  function wpfEinbringbar(name) {
+    const s = namensSchluessel(name);
+    if (!s) return null;
+    if (NICHT_EINBRINGBAR.has(s)) return false;
+    return WAHLPFLICHTFAECHER.some((w) => namensSchluessel(w.name) === s) ? true : null;
+  }
 
   /**
    * Profilfächer je Richtung. jg = Jahrgangsstufen 11–13.
@@ -150,6 +170,8 @@ const Presets = (function () {
       schulaufgaben: v.sa,
       wpf: v.wpf,
       gewichtung: { modus: 'fobos', saAnteil: 50 },
+      streichen: 'auto', // Fachabi: 'auto' | 'ja' (erzwingen) | 'nein' (möglichst nicht)
+      streichenAbi: 'auto', // dasselbe fürs Abitur (13. Klasse)
       noten: [],
       zeugnis: {},
       pruefung: { schriftlich: null, muendlich: null },
@@ -224,7 +246,10 @@ const Presets = (function () {
     return fachAusVorlage(F(name, [12]), index);
   }
 
-  return { RICHTUNGEN, FARBEN, WAHLPFLICHTFAECHER, faecherFuer, dreizehnErgaenzen, alteNamen, schuljahr, leeresFach, neueId };
+  // Gruppen des Streichvorschlag-Tools: SWW streicht 2 + 2 x WPF, GTAG 1 + 2 x WPF Halbjahre.
+  const GRUPPE = { sozial: 'SWW', wirtschaft: 'SWW', intwirtschaft: 'SWW', gesundheit: 'GTAG', technik: 'GTAG', abu: 'GTAG', gestaltung: 'GTAG' };
+
+  return { RICHTUNGEN, GRUPPE, FARBEN, WAHLPFLICHTFAECHER, wpfEinbringbar, faecherFuer, dreizehnErgaenzen, alteNamen, schuljahr, leeresFach, neueId };
 })();
 
 if (typeof module !== 'undefined') module.exports = Presets;
