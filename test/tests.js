@@ -127,9 +127,10 @@
   teil[0].zeugnis = { '12_1': 10 };
   const rt = C.fachabitur(ein({ faecher: teil, fpa: {} }));
   eq('Teilstand nichts gestrichen', rt.kandidaten.filter((k) => k.gestrichen).length, 0);
-  eq('Teilstand E/M', [rt.E, rt.M], [10, 15]);
+  // Teilstand mit 'ein' ohne Wahl rechnet wie 'aus': jedes Halbjahr zählt 25/30
+  eq('Teilstand E/M', [nah(rt.E, 10 * 25 / 30), rt.M, rt.umgerechnet], [true, 12.5, true]);
   eq('Teilstand S', rt.S, 2.3); // 17/3 - 5 * 10/15 = 2,333 -> 2,3
-  eq('Teilstand Rest', rt.restMax, 24 * 15 + 4 * 45 + 2 * 15);
+  eq('Teilstand Rest', [rt.restMax, rt.M + rt.restMax], [29 * 15 * 25 / 30 + 4 * 45 + 2 * 15, 585]);
 
   // Eigenes Gewicht für eine Schulaufgabe: (2*11 + 9,667) / 3 = 10,556 -> 11
   const fachW = { ...fach, noten: fach.noten.map((n, i) => (i === 0 ? { ...n, gewicht: 2 } : n)) };
@@ -297,11 +298,12 @@
   eq('Teilstand ein ohne Wahl: nichts gestrichen', anzahlGestrichen(C.fachabitur(ein(stTeil))), 0);
   r2 = C.fachabitur(manuell(stTeil, { [teilM[0].id]: '12_1' }));
   eq('Teilstand manuell: Deutsch 12/1 gestrichen', gestrichenIn(r2, teilM[0]), ['12_1']);
-  eq('Teilstand manuell: E', r2.E, 10);
+  // Eine Streichung von 5: Z = 29 nicht gestrichene Halbjahre, E = 10 × 25 / 29
+  eq('Teilstand manuell: E', [nah(r2.E, 10 * 25 / 29), r2.zaehlbarHj], [true, 29]);
   // Auch ein noch offenes Halbjahr lässt sich streichen; es fehlt dann nicht mehr
   const offenVorher = C.fachabitur(stTeil).slotsOffen;
   r2 = C.fachabitur(manuell(stTeil, { [teilM[0].id]: '12_2' }));
-  eq('Teilstand manuell: offenes HJ gestrichen', [gestrichenIn(r2, teilM[0]), r2.slotsOffen, r2.E], [['12_2'], offenVorher - 1, 15]);
+  eq('Teilstand manuell: offenes HJ gestrichen', [gestrichenIn(r2, teilM[0]), r2.slotsOffen, nah(r2.E, 15 * 25 / 29)], [['12_2'], offenVorher - 1, true]);
 
   // k ohne Wahl wird automatisch gestrichen und zählt zu N
   t = technik((by) => { by('Chemie').zeugnis['12_1'] = 'k'; });
@@ -680,6 +682,71 @@
   const rAbiEin = C.abitur(ein(stJ, 'abitur'));
   eq('Abitur ein ohne Wahl', [rAbiEin.E, rAbiEin.S, rAbiEin.manuellAnzahl, anzahlGestrichen(rAbiEin), rAbiEin.ergebnis], [274, 2.1, 0, 2, 'bestanden']);
   eq('Abitur: Standard aus, Fachabi unberührt', [C.abitur(stAbi).streichModus, C.fachabitur(ein(stJ, 'abitur')).streichModus], ['aus', 'aus']);
+
+  // ===== Teilstand mit „Streichen“ an: keine Vorschläge, Zähler zählt alles =====
+  // Wie mitten in der 12.: 12/2 fehlt überall, Geschichte (nur 11) ist fertig mit 7 und 11,
+  // Englisch 12/1 = 2. Früher schlug die App Geschichte 11/1 vor und zeigte „Gestrichen: 0 von 5“.
+  const mitte = () => technik((by, fx) => {
+    for (const f of fx) delete f.zeugnis['12_2'];
+    by('Geschichte').zeugnis = { '11_1': 7, '11_2': 11 };
+    by('Englisch').zeugnis['12_1'] = 2;
+  });
+  t = mitte();
+  const rMitteAus = C.fachabitur(t.st);
+  r2 = C.fachabitur(ein(t.st));
+  eq('Mitte: Teilstand', [r2.komplett, r2.slotsOffen > 0, r2.ergebnis], [false, true, 'unvollständig']);
+  eq('Mitte: kein Vorschlag, Geschichte bleibt', [anzahlGestrichen(r2), gestrichenIn(r2, t.by('Geschichte')), r2.tausch], [0, [], []]);
+  eq('Mitte: Zähler 0', [r2.streichZaehler, C.streichAufschluesselung(r2)], [{ gesamt: 0, vonDir: 0, k: 0, vorschlag: 0 }, '']);
+  // Ohne Wahl genau wie 'aus': Z = 30 Slots, davon 11 offen (12/2), 19 erfasst.
+  // HJ-Summe = 17 × 11 + 7 + 2 = 196 (Geschichte 7 und 11, Englisch 12/1 = 2);
+  // E = 114 + 24 + 196 × 25 / 30 = 138 + 163,333… = 301,333…; M = 180 + 30 + 19 × 15 × 25 / 30 = 447,5
+  // S = 17/3 − 5 × 301,333… / 447,5 = 5,6667 − 3,3669 = 2,2998 -> 2,2
+  eq('Mitte: ein ohne Wahl = aus', [r2.E, r2.M, r2.S, r2.restMax], [rMitteAus.E, rMitteAus.M, rMitteAus.S, rMitteAus.restMax]);
+  eq('Mitte: Werte', [nah(r2.E, 138 + 196 * 25 / 30), nah(r2.M, 447.5), r2.S, r2.zaehlbarHj], [true, true, 2.2, 30]);
+  // Eigene Wahl im Teilstand zählt: Englisch 12/1 = 2 weg, Z = 29, E = 138 + 194 × 25 / 29 = 305,24…, S 2,2196 -> 2,2
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Englisch').id]: '12_1' }));
+  eq('Mitte manuell: Wahl zählt, kein Vorschlag', [gestrichenIn(r2, t.by('Englisch')), wahlIn(r2, t.by('Englisch')), anzahlGestrichen(r2), gestrichenIn(r2, t.by('Geschichte'))], [['12_1'], ['manuell'], 1, []]);
+  eq('Mitte manuell: Zähler 1', [r2.streichZaehler, C.streichAufschluesselung(r2)], [{ gesamt: 1, vonDir: 1, k: 0, vorschlag: 0 }, '(1 von dir)']);
+  eq('Mitte manuell: E', [nah(r2.E, 138 + 194 * 25 / 29), r2.zaehlbarHj, r2.S], [true, 29, 2.2]);
+  // Antippen im Teilstand geht weiter
+  const stTipp = JSON.parse(JSON.stringify(ein(t.st)));
+  eq('Mitte: Antippen streicht', C.streichTippen(stTipp, 'fachabi', t.by('Englisch').id, '12_1').geaendert, true);
+  eq('Mitte: Antippen gemerkt', C.fachabitur(stTipp).streichZaehler.vonDir, 1);
+  // k im Teilstand wird gestrichen und gezählt, sonst nichts
+  t = technik((by, fx) => {
+    for (const f of fx) delete f.zeugnis['12_2'];
+    by('Chemie').zeugnis['12_1'] = 'k';
+  });
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_1' }));
+  eq('Mitte k: k und Wahl gestrichen', [gestrichenIn(r2, t.by('Chemie')), gestrichenIn(r2, t.by('Deutsch')), anzahlGestrichen(r2)], [['12_1'], ['12_1'], 2]);
+  eq('Mitte k: Zähler', [r2.streichZaehler, C.streichAufschluesselung(r2)], [{ gesamt: 2, vonDir: 1, k: 1, vorschlag: 0 }, '(1 von dir, 1 k-Halbjahr)']);
+  eq('Mitte k ohne Wahl: nur k, wie aus', [anzahlGestrichen(C.fachabitur(ein(t.st))), C.fachabitur(ein(t.st)).E === C.fachabitur(t.st).E], [1, true]);
+  // Vollständig: Vorschläge wie bisher, Zähler = N mit Aufschlüsselung
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; });
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_2', [t.by('Englisch').id]: '12_1' }));
+  eq('voll: Zähler 5 von 5', [r2.komplett, r2.zuStreichen, r2.streichZaehler, C.streichAufschluesselung(r2)], [true, 5, { gesamt: 5, vonDir: 2, k: 0, vorschlag: 3 }, '(2 von dir, 3 Vorschläge der App)']);
+  eq('voll: E wie bisher, nicht umgerechnet', [r2.E, r2.umgerechnet, r2.zaehlbarHj], [413, false, null]);
+  r2 = C.fachabitur(ein(t.st));
+  eq('voll ohne Wahl: 5 Vorschläge', [C.streichAufschluesselung(r2), r2.E], ['(5 Vorschläge der App)', 413]);
+  // Das letzte offene Halbjahr selbst gestrichen: vollständig, der Rest wird vorgeschlagen
+  t = technik((by) => { by('Technologie').zeugnis['12_1'] = 3; delete by('Deutsch').zeugnis['12_2']; });
+  r2 = C.fachabitur(manuell(t.st, { [t.by('Deutsch').id]: '12_2' }));
+  eq('letztes offenes gestrichen: vollständig, Vorschläge', [r2.komplett, r2.streichZaehler, gestrichenIn(r2, t.by('Technologie')), r2.E], [true, { gesamt: 5, vonDir: 1, k: 0, vorschlag: 4 }, ['12_1'], 413]);
+
+  // Abitur: dieselbe Regel für 13/1 + 13/2
+  const faTeil = faJ.map((f) => (f.name === 'Deutsch' ? { ...f, zeugnis: { '13_1': 11 } } : f));
+  const stAbiTeil = { ...stJ, faecher: faTeil };
+  const rAbiTeilAus = C.abitur(stAbiTeil);
+  rAbi = C.abitur(ein(stAbiTeil, 'abitur'));
+  // 18 Slots, 17 erfasst (Chemie 13/1 = 2, sonst 11): HJ-Summe = 16 × 11 + 2 = 178; E = 98 + 178 × 16 / 18 = 256,222…
+  // M = 150 + 17 × 15 × 16 / 18 = 376,666…; S = 17/3 − 5 × 256,222… / 376,666… = 2,2655 -> 2,2
+  eq('Abitur Teilstand: kein Vorschlag, Chemie 2 bleibt', [rAbi.komplett, anzahlGestrichen(rAbi), chemieAbi(rAbi), rAbi.streichZaehler.gesamt], [false, 0, [], 0]);
+  eq('Abitur Teilstand: wie aus', [nah(rAbi.E, 98 + 178 * 16 / 18), rAbi.E === rAbiTeilAus.E, rAbi.S, rAbi.S === rAbiTeilAus.S], [true, true, 2.2, true]);
+  rAbi = C.abitur(manuell(stAbiTeil, { [fid('Chemie')]: '13_1' }, 'abitur'));
+  eq('Abitur Teilstand manuell', [chemieAbi(rAbi), C.streichAufschluesselung(rAbi), nah(rAbi.E, 98 + 176 * 16 / 17)], [['13_1'], '(1 von dir)', true]);
+  // Vollständig: wie bisher
+  rAbi = C.abitur(ein(stJ, 'abitur'));
+  eq('Abitur voll: Vorschläge', [rAbi.komplett, C.streichAufschluesselung(rAbi), rAbi.E], [true, '(2 Vorschläge der App)', 274]);
 
   log(`${ok} Tests bestanden, ${fail} fehlgeschlagen`);
   if (fail && isNode) process.exitCode = 1;
