@@ -234,6 +234,19 @@ input.switch:checked::before { transform: translateX(20px); }
 .status.ok { color: var(--ok); }
 .status.nein { color: var(--danger); }
 .hinweis-liste { margin: 0 0 10px; padding-left: 18px; color: var(--muted); font-size: 0.85rem; display: grid; gap: 2px; }
+.check-liste .neutral { color: var(--muted); }
+/* Abitur: fachgebundene und allgemeine Hochschulreife nebeneinander */
+.hsr-spalten { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hsr-spalte { display: grid; gap: 2px; align-content: start; min-width: 0; padding: 12px; border-radius: 12px; background: var(--card-2); }
+.hsr-spalte.flaeche { background: hsl(var(--h) var(--h-sat) var(--h-flaeche)); }
+.hsr-spalte h4 { margin: 0; font-size: 0.85rem; line-height: 1.25; }
+.hsr-spalte .kachel-wert { line-height: 1.15; margin-top: 4px; }
+.hsr-spalte .status { margin: 6px 0 0; font-size: 0.85rem; }
+.hsr-titel { margin: 14px 0 6px; font-size: 0.9rem; }
+.hsr-mehr { margin: 10px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--card-2); }
+.hsr-mehr summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; padding: 4px 0; }
+.hsr-mehr .status { margin: 8px 0 6px; }
+@media (max-width: 340px) { .hsr-spalten { grid-template-columns: 1fr; } }
 .hj-chip.k-offen { color: var(--danger); }
 /* „Streichen“ aus: k-Halbjahr zählt nicht, neutral statt rot */
 .hj-chip.k-neutral { color: var(--muted); background: var(--card-2); border: 1.5px dashed var(--border); }
@@ -279,6 +292,32 @@ input.switch:checked::before { transform: translateX(20px); }
 .willkommen .feld { text-align: left; }
 .logo-gross { display: block; width: 88px; height: 88px; margin: 8px auto; border-radius: 22px; box-shadow: 0 8px 24px rgba(47, 63, 214, 0.35); }
 
+/* Onboarding: Abschluss wählen */
+.wahl-liste { display: grid; gap: 8px; margin: 12px 0; text-align: left; }
+.wahl-karte { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 2px solid var(--border); border-radius: 14px; background: var(--card-2); cursor: pointer; }
+.wahl-karte:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.wahl-karte input { width: 20px; height: 20px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.wahl-text { display: grid; gap: 1px; min-width: 0; }
+.wahl-text small { color: var(--muted); font-size: 0.82rem; }
+.ob-teil { text-align: left; }
+
+/* Notenmodus (Realschule, andere Schule) */
+.noten-raster { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.note-btn { border: 2px solid transparent; border-radius: 10px; padding: 10px 0; font-weight: 800; font-size: 1.25rem; line-height: 1.1; }
+.note-btn.gewaehlt { border-color: currentColor; transform: scale(1.06); box-shadow: 0 0 0 2px var(--card); }
+.tendenz-reihe { display: flex; gap: 6px; margin-top: 8px; }
+.tendenz-reihe .chip-klein { flex: 1; }
+.chip-klein:disabled { opacity: 0.35; cursor: default; }
+.noten-vorschau { margin: 2px 0 0; font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+.kachel-wert.text { font-size: 1.35rem; line-height: 1.25; padding: 6px 0 4px; }
+.hero-wert.text { font-size: 2.2rem; padding: 4px 0; }
+.flaeche .hero-wert.text, .flaeche .kachel-wert.text { color: hsl(var(--h) var(--h-sat) var(--h-fg)); }
+.hinweis.klein-abstand { margin: 8px 0 0; }
+.pruef-name small { display: block; color: var(--muted); font-weight: 500; font-size: 0.78rem; }
+.p-wert { font-size: 0.82rem; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pruef-hinweis { flex-basis: 100%; margin: 0; font-size: 0.8rem; color: var(--warn-text); }
+.feld-wert { font-weight: 600; color: var(--muted); }
+
 /* Toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
@@ -289,5 +328,6 @@ input.switch:checked::before { transform: translateX(20px); }
 
 @media (max-width: 380px) {
   .punkte-raster { grid-template-columns: repeat(4, 1fr); }
+  .noten-raster { grid-template-columns: repeat(3, 1fr); }
   .kachel-wert { font-size: 1.6rem; }
 }

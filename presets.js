@@ -79,63 +79,65 @@ const Presets = (function () {
   /**
    * Profilfächer je Richtung. jg = Jahrgangsstufen 11–13.
    * Namen: [neu, alt] falls umbenannt.
+   * pf13: Profilfach 1–3 der 13. Klasse wie im Streichvorschlag-Tool der FOS (Jgst. 13). Gilt nur
+   * für die Reihenfolge der Fächerliste der 13. Klasse; die Listen der 11. und 12. bleiben unverändert.
    */
   const RICHTUNGEN = {
     technik: {
       name: 'Technik',
       profil: [
-        { n: 'Physik', jg: [11, 12, 13], p1: true },
-        { n: ['KIT (KI, Informatik und Technologie)', 'Technologie'], jg: [11, 12, 13] },
-        { n: 'Chemie', jg: [11, 12, 13] },
+        { n: 'Physik', jg: [11, 12, 13], p1: true, pf13: 1 },
+        { n: ['KIT (KI, Informatik und Technologie)', 'Technologie'], jg: [11, 12, 13], pf13: 2 },
+        { n: 'Chemie', jg: [11, 12, 13], pf13: 3 },
         { n: 'Mathematik Additum', jg: [12] },
       ],
     },
     abu: {
       name: 'Agrarwirtschaft, Bio- und Umwelttechnologie',
       profil: [
-        { n: 'Biologie', jg: [11, 12, 13], p1: true },
-        { n: 'Chemie', jg: [11, 12, 13] },
+        { n: 'Biologie', jg: [11, 12, 13], p1: true, pf13: 1 },
+        { n: 'Chemie', jg: [11, 12, 13], pf13: 2 },
         { n: 'Physik', jg: [11, 12] },
-        { n: 'Technologie', jg: [12, 13] },
+        { n: 'Technologie', jg: [12, 13], pf13: 3 },
       ],
     },
     wirtschaft: {
       name: 'Wirtschaft und Verwaltung',
       profil: [
-        { n: ['BWL', 'BwR (Betriebswirtschaftslehre mit Rechnungswesen)'], jg: [11, 12, 13], p1: true },
-        { n: 'Volkswirtschaftslehre', jg: [11, 12, 13] },
+        { n: ['BWL', 'BwR (Betriebswirtschaftslehre mit Rechnungswesen)'], jg: [11, 12, 13], p1: true, pf13: 1 },
+        { n: 'Volkswirtschaftslehre', jg: [11, 12, 13], pf13: 2 },
         { n: 'Rechtslehre', jg: [11] },
-        { n: 'Naturwissenschaften', jg: [12, 13] },
+        { n: 'Naturwissenschaften', jg: [12, 13], pf13: 3 },
         { n: ['KIWI (KI und Wirtschaftsinformatik)', 'Informatik'], jg: [12] },
       ],
     },
     intwirtschaft: {
       name: 'Internationale Wirtschaft',
       profil: [
-        { n: 'IBV (Internationale BWL und VWL)', jg: [11, 12, 13], p1: true },
-        { n: 'Französisch/Spanisch', jg: [11, 12, 13], sa: true },
+        { n: 'IBV (Internationale BWL und VWL)', jg: [11, 12, 13], p1: true, pf13: 1 },
+        { n: 'Französisch/Spanisch', jg: [11, 12, 13], sa: true, pf13: 2 },
         { n: 'Rechtslehre', jg: [11] },
-        { n: 'Naturwissenschaften', jg: [12, 13] },
+        { n: 'Naturwissenschaften', jg: [12, 13], pf13: 3 },
         { n: ['KIWI (KI und Wirtschaftsinformatik)', 'International Business Studies'], jg: [12] },
       ],
     },
     sozial: {
       name: 'Sozialwesen',
       profil: [
-        { n: 'Pädagogik/Psychologie', jg: [11, 12, 13], p1: true },
-        { n: 'Sozialwirtschaft und Recht', jg: [11, 12, 13] },
+        { n: 'Pädagogik/Psychologie', jg: [11, 12, 13], p1: true, pf13: 1 },
+        { n: 'Sozialwirtschaft und Recht', jg: [11, 12, 13], pf13: 2 },
         { n: 'Chemie', jg: [11] },
-        { n: 'Biologie', jg: [12, 13] },
+        { n: 'Biologie', jg: [12, 13], pf13: 3 },
         { n: 'Soziologie', jg: [12] },
       ],
     },
     gesundheit: {
       name: 'Gesundheit',
       profil: [
-        { n: 'Gesundheitswissenschaften', jg: [11, 12, 13], p1: true },
+        { n: 'Gesundheitswissenschaften', jg: [11, 12, 13], p1: true, pf13: 1 },
         { n: 'Chemie', jg: [11, 12] },
-        { n: 'Kommunikation und Interaktion', jg: [11, 12, 13] },
-        { n: 'Biologie', jg: [12, 13] },
+        { n: 'Kommunikation und Interaktion', jg: [11, 12, 13], pf13: 3 },
+        { n: 'Biologie', jg: [12, 13], pf13: 2 },
       ],
     },
     gestaltung: {
@@ -143,9 +145,9 @@ const Presets = (function () {
       profil: [
         { n: 'Gestaltung Praxis', jg: [11, 12], p1: true },
         { n: 'Gestaltung Theorie', jg: [11, 12] },
-        { n: 'Gestaltung', jg: [13], p1abi: true },
-        { n: 'Medien', jg: [11, 12, 13] },
-        { n: 'Naturwissenschaften', jg: [12, 13] },
+        { n: 'Gestaltung', jg: [13], p1abi: true, pf13: 1 },
+        { n: 'Medien', jg: [11, 12, 13], pf13: 2 },
+        { n: 'Naturwissenschaften', jg: [12, 13], pf13: 3 },
       ],
     },
   };
@@ -204,7 +206,17 @@ const Presets = (function () {
       F('Englisch', jgFilter([11, 12, 13]), { p: true, pa: true }),
       F('Mathematik', jgFilter([11, 12, 13]), { p: true, pa: true }),
     ];
-    for (const pf of r.profil) {
+    // 13. Klasse: Profilfächer der 13. in der Reihenfolge Profilfach 1–3 des Tools (pf13).
+    // Sie tauschen nur untereinander die Plätze; Fächer ohne 13 bleiben, wo sie sind.
+    let profil = r.profil;
+    if (mit13) {
+      const plaetze = [];
+      profil.forEach((pf, i) => { if (pf.pf13) plaetze.push(i); });
+      const sortiert = profil.filter((pf) => pf.pf13).sort((a, b) => a.pf13 - b.pf13);
+      profil = profil.slice();
+      plaetze.forEach((pos, j) => { profil[pos] = sortiert[j]; });
+    }
+    for (const pf of profil) {
       const jg = jgFilter(pf.jg);
       if (!jg.length) continue;
       liste.push(F(name(pf.n), jg, { p: !!pf.p1 && jg.some((j) => j <= 12), pa: (!!pf.p1 || !!pf.p1abi) && jg.includes(13), sa: pf.sa || pf.p1 || pf.p1abi }));

@@ -1,6 +1,8 @@
-# Fachabi-Rechner (FOS Bayern)
+# Fachabi-Rechner (FOS Bayern) und Notenrechner
 
 Web-App (PWA) für das bayerische Fachabitur an der Fachoberschule. Du trägst einzelne Noten ein. Die App berechnet daraus Halbjahresergebnisse, Gesamtergebnisse und den Fachabi-Schnitt nach FOBOSO (Fassung ab 01.08.2026, ohne Fachreferat).
+
+Beim Start wählst du den Abschluss: Realschulabschluss (Realschule Bayern, Klasse 5–10), Fachabitur, Abitur (FOS) oder „Andere Schule“ mit eigenem Notensystem. Realschule und andere Schule rechnen mit Noten 1–6 (andere Schule wahlweise Punkte 15–0).
 
 ## Starten
 
@@ -16,12 +18,14 @@ Dann im Browser `http://localhost:8765` öffnen.
 
 | Datei | Inhalt |
 | --- | --- |
-| `calc.js` | Rechenlogik (Paragraphen im Kopfkommentar) |
+| `calc.js` | Rechenlogik FOS (Paragraphen im Kopfkommentar) |
 | `presets.js` | Fächer je Ausbildungsrichtung nach Anlage 1 FOBOSO |
+| `realschule.js` | Rechenlogik Realschule und Notensystem „andere Schule“, Fächer-Vorlagen Realschule |
 | `app.js` | Oberfläche |
 | `index.html`, `style.css` | Seite und Design (hell/dunkel) |
 | `sw.js`, `manifest.webmanifest`, `icon.svg` | PWA: Offline-Cache und Installation |
-| `test/tests.js` | Tests der Rechenlogik |
+| `test/tests.js` | Tests der Rechenlogik FOS |
+| `test/realschule-tests.js` | Tests der Realschul- und Notenlogik |
 
 ## Tests
 
@@ -29,6 +33,7 @@ Ohne Node, mit der JavaScript-Engine von macOS:
 
 ```bash
 /System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc calc.js presets.js test/tests.js
+/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc realschule.js test/realschule-tests.js
 ```
 
 ## Rechenregeln (Kurzfassung)
@@ -45,6 +50,17 @@ Ohne Node, mit der JavaScript-Engine von macOS:
 - Bestehen (§ 35 Abs. 9): höchstens 2 Prüfungs- und 2 Gesamtergebnisse unter 4 Punkten (0 zählt doppelt); bei einer Unterpunktung mindestens 195, bei zweien 234 Punkte. Ein k-Halbjahr, das nicht gestrichen werden kann, heißt nicht bestanden.
 - Schnitt (§ 27 Abs. 3): 17/3 − 5 × E / 585, auf eine Nachkommastelle abgeschnitten (nicht gerundet).
 - Abitur (13. Klasse, § 35 Abs. 7): 4 Prüfungen × 2, Seminar × 2 und 16 Halbjahre aus 13/1 und 13/2 = 390 Punkte (mit 2. Fremdsprache 420).
+
+## Realschule Bayern und andere Schule (Kurzfassung, vorläufig, ohne Gewähr)
+
+Rechtsgrundlage RSO (Fassung ab 01.08.2026), nur aus Zusammenfassungen gelesen. Die Fächerlisten sind ein Startpunkt und nicht geprüft.
+
+- Einstellung „Notensystem der Schule“: Notenskala (Realschule fest Noten 1–6), Gewichtung (Standard: Schulaufgaben doppelt; alle gleich; Prozent Schulaufgaben/kleine; eigene Gewichte je Notenart), Tendenzen (aus, ±0,25 Standard, ±0,33), Rundung (Standard: bis ,49 die bessere, ab ,50 die schlechtere Note; oder ab ,50 die bessere). Einzelne Fächer (Prozent-Aufteilung) und Noten (eigenes Gewicht) können abweichen.
+- Jahresfortgangsnote (§ 23 Abs. 2): Σ(Gewicht × Note) / Σ Gewicht, Schulaufgaben und Kurzarbeit/Test statt Schulaufgabe ×2, kleine ×1. Zwischenzeugnis = Noten des 1. Halbjahrs, Jahreszeugnis = alle Noten des Jahres. Schnitt mit 2 Nachkommastellen, gerundet nach Einstellung. Ein Zeugniswert ersetzt die Rechnung.
+- Vorrücken (Klasse 5–9, § 24–27): gefährdet bei einer 6 oder zwei 5 in Vorrückungsfächern (Kunst, Musik, Sport, Werken, Textiles Gestalten nicht, außer als Wahlpflichtfach der Gruppe III). Hinweise auf Vorrücken auf Probe und Nachprüfung.
+- Realschulabschluss (Klasse 10, § 35–40): Prüfungsnote P = W, (2W + O) / 3, (W + Pr) / 2 bzw. (2 × (W + Pr) / 2 + O) / 3. Gesamtnote im Prüfungsfach = P gerundet, sonst die Jahresfortgangsnote. Bestehen: nicht bei einer 6 in Deutsch; sonst nicht bei einer 6 oder zwei 5 in Vorrückungsfächern, außer Notenausgleich (eine 1, zwei 2 oder vier 3 in anderen Vorrückungsfächern, bessere Noten zählen mit; nicht bei einer weiteren 5 oder 6). FOS-Info: Schnitt Deutsch/Englisch/Mathematik, 3,5 oder besser.
+- Andere Schule: dieselben Notenansichten ohne Abschluss- und Vorrückungsrechnung.
+- Alte Stände ohne Abschluss: Klasse 13 wird „Abitur“, sonst „Fachabitur“.
 
 ## Funktionen
 

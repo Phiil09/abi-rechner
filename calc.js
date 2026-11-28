@@ -39,6 +39,24 @@
  *  - Gesamtergebnisoptimierter Vorschlag (Tausch) nur bei bestandenem Stand.
  *  - "k" (keine Note möglich) muss gestrichen werden; mehr k als Streichungen => nicht bestanden.
  *
+ * Abgleich mit dem Streichvorschlag-Tool der FOS (Jgst. 13), nur Abitur (art 'abitur'):
+ *  - Fachgebundene (FHR) und allgemeine Hochschulreife (AHR) werden getrennt gerechnet, jede mit
+ *    eigener Streichauswahl. FHR: M = 390 immer, die 2. Fremdsprache zählt nicht. AHR nur mit
+ *    Nachweis der 2. Fremdsprache (state.zweiteFS.modus):
+ *      'jgst13'     WPF in der 13.: M 390, 13/1 + 13/2 des Fachs nicht streichbar,
+ *                   Mittel >= 3,5 und 13/2 >= 4; ohne gewähltes Fach keine AHR.
+ *      'wpf12'      aus der 12. fortgeführt: M 420, E + 12/1 + 12/2, Mittel >= 3,5 und 12/2 >= 4.
+ *      'ergaenzung' Ergänzungsprüfung: M 420, E + 2 x Punkte, Punkte >= 4.
+ *      'b1'         Sprachniveau B1 anderweitig nachgewiesen: AHR = FHR.
+ *      'pf2iw'      Internationale Wirtschaft, Französisch/Spanisch als Profilfach 2: M 390,
+ *                   13/1 + 13/2 von Profilfach 2 nicht streichbar, Mittel >= 3,5 und 13/2 >= 4.
+ *    Schwellen bei einer bzw. zwei Unterpunktungen: M/3 und 0,4 x M der jeweiligen Variante
+ *    (FHR immer 130/156; AHR 130/156 bzw. 140/168).
+ *  - Das Seminar zählt bei den Gesamtergebnis-Unterpunktungen mit (0 doppelt); Seminar 0 =>
+ *    nicht bestanden. Die mündliche Prüfung in Englisch ist Pflicht für "vollständig".
+ *  - Bewusst NICHT übernommen: FHR-Schwellen abhängig vom gewählten 2.-FS-Nachweis; nicht
+ *    einbringbares WPF als Unterpunktung; k in der Anzahl, aber nicht in E.
+ *
  * Streichmodus (state.streichModus[art]: 'aus' | 'ein', Standard 'aus'; state.gestrichen[art]: { fachId: hj }):
  *  - 'aus': nichts wird gestrichen (gestrichen wird erst am Ende der 12. bzw. 13. Klasse). Alle
  *    einbringbaren Halbjahre zählen, auch 11/1 der Fächer, die mit Jgst. 11 enden. k-Halbjahre
@@ -65,6 +83,7 @@ const Calc = (function () {
   const HJ_LABEL = { '11_1': '11/1', '11_2': '11/2', '12_1': '12/1', '12_2': '12/2', '13_1': '13/1', '13_2': '13/2' };
   const M_GESAMT = 585; // Fachabitur
   const M_ABITUR = 390;
+  const M_ABITUR_FS = 420; // allgemeine Hochschulreife mit 2. Fremdsprache aus der 12. oder Ergänzungsprüfung
 
   const istZahl = (v) => typeof v === 'number' && Number.isFinite(v);
   const zahl = (v) => {
@@ -313,6 +332,20 @@ const Calc = (function () {
     wirtschaft: [['BWL', 'BwR (Betriebswirtschaftslehre mit Rechnungswesen)'], ['Volkswirtschaftslehre'], ['Rechtslehre'], ['Naturwissenschaften'], ['KIWI (KI und Wirtschaftsinformatik)', 'Informatik']],
     intwirtschaft: [['IBV (Internationale BWL und VWL)'], ['Französisch/Spanisch'], ['Rechtslehre'], ['Naturwissenschaften'], ['KIWI (KI und Wirtschaftsinformatik)', 'International Business Studies']],
   };
+  /**
+   * Jgst. 13 (Abitur): Profilfach 1–3 je Richtung wie im Streichvorschlag-Tool der FOS (Jgst. 13).
+   * Zeilen dort: Religionslehre, Deutsch, Englisch, Geschichte/PuG, Mathematik, Profilfach 1–3,
+   * (Seminar), Wahlpflichtfach 1, Wahlpflichtfach 2.
+   */
+  const TOOL_PROFIL_13 = {
+    technik: [['Physik'], ['KIT (KI, Informatik und Technologie)', 'Technologie'], ['Chemie']],
+    abu: [['Biologie'], ['Chemie'], ['Technologie']],
+    gesundheit: [['Gesundheitswissenschaften'], ['Biologie'], ['Kommunikation und Interaktion']],
+    gestaltung: [['Gestaltung'], ['Medien'], ['Naturwissenschaften']],
+    sozial: [['Pädagogik/Psychologie'], ['Sozialwirtschaft und Recht'], ['Biologie']],
+    wirtschaft: [['BWL', 'BwR (Betriebswirtschaftslehre mit Rechnungswesen)', 'BwR'], ['Volkswirtschaftslehre'], ['Naturwissenschaften']],
+    intwirtschaft: [['IBV (Internationale BWL und VWL)', 'IBV'], ['Französisch/Spanisch'], ['Naturwissenschaften']],
+  };
   const schluessel = (n) => String(n || '').toLowerCase().replace(/[^a-zäöüß]/g, '');
   const TOOL_GRUND = {
     religionslehreethik: 8, religionslehre: 8, ethik: 8, religion: 8,
@@ -321,12 +354,12 @@ const Calc = (function () {
   };
 
   /** Richtung aus state.richtung oder, falls nicht gesetzt, aus dem Namen des Prüfungs-Profilfachs 1. */
-  function richtungVon(faecher, richtung) {
-    if (richtung && TOOL_PROFIL[richtung]) return richtung;
+  function richtungVon(faecher, richtung, tabelle = TOOL_PROFIL) {
+    if (richtung && tabelle[richtung]) return richtung;
     for (const f of faecher) {
       if (!f.pruefungsfach && !f.pruefungsfachAbi) continue;
       const s = schluessel(f.name);
-      for (const [r, liste] of Object.entries(TOOL_PROFIL)) if (liste[0].some((n) => schluessel(n) === s)) return r;
+      for (const [r, liste] of Object.entries(tabelle)) if (liste[0].some((n) => schluessel(n) === s)) return r;
     }
     return null;
   }
@@ -335,11 +368,13 @@ const Calc = (function () {
    * Rang je Fach in der Zeilenreihenfolge des Tools: { fachId: Zahl }. Bekannte Fächer nach Rolle
    * (Wahlpflichtfach, Name), Profilfächer nach der Reihenfolge der Richtung; unbekannte oder selbst
    * angelegte Fächer danach in der Reihenfolge der App. Bei gleicher Rolle entscheidet die App-Reihenfolge.
+   * art 'abitur': Profilfächer in der Reihenfolge der Jgst. 13 (TOOL_PROFIL_13).
    */
-  function toolRang(faecher, richtung) {
-    const r = richtungVon(faecher, richtung);
-    const profil = r ? TOOL_PROFIL[r] : null;
-    const alleProfil = new Set([].concat(...Object.values(TOOL_PROFIL).map((l) => [].concat(...l))).map(schluessel));
+  function toolRang(faecher, richtung, art = 'fachabi') {
+    const tabelle = art === 'abitur' ? TOOL_PROFIL_13 : TOOL_PROFIL;
+    const r = richtungVon(faecher, richtung, tabelle);
+    const profil = r ? tabelle[r] : null;
+    const alleProfil = new Set([].concat(...Object.values(tabelle).map((l) => [].concat(...l))).map(schluessel));
     const rang = {};
     faecher.forEach((f, i) => {
       const s = schluessel(f.name);
@@ -576,11 +611,90 @@ const Calc = (function () {
     };
   }
 
+  /** Nachweise der 2. Fremdsprache (state.zweiteFS.modus); Unbekanntes gilt als 'keine'. */
+  const FS_MODI = ['keine', 'jgst13', 'wpf12', 'ergaenzung', 'b1', 'pf2iw'];
+  function zweiteFSVon(state) {
+    const fs = (state && state.zweiteFS) || {};
+    return { ...fs, modus: FS_MODI.includes(fs.modus) ? fs.modus : 'keine' };
+  }
+
+  /**
+   * Internationale Wirtschaft, Modus 'pf2iw': Profilfach 2 (Französisch/Spanisch) der 13. Klasse.
+   * Bewusst nur über den Namen, nicht über zweiteFS.fachId (die bleibt beim Moduswechsel aus
+   * 'jgst13' stehen und zeigt dann auf das Wahlpflichtfach).
+   */
+  function profilfach2IW(faecher) {
+    const mit13 = faecher.filter((f) => einbringbareHalbjahreAbitur(f).length);
+    const namen = TOOL_PROFIL_13.intwirtschaft[1].map(schluessel);
+    return mit13.find((f) => namen.includes(schluessel(f.name))) ||
+      mit13.find((f) => !f.wpf && /franz|span/i.test(f.name || '')) || null;
+  }
+
+  /**
+   * Bedingungen der allgemeinen Hochschulreife (Sprachniveau B1 in der 2. Fremdsprache), wie im
+   * Streichvorschlag-Tool der FOS (Jgst. 13): Mittel der zwei Halbjahre >= 3,5 und das letzte
+   * Halbjahr >= 4 Punkte; Ergänzungsprüfung >= 4 Punkte. Liste [{ ok, text }].
+   */
+  function ahrBedingungenVon(fs, fsFach, richtung) {
+    const txt = (v) => (v === null ? '–' : String(v));
+    const mittelUndLetztes = (wo, a, b, hjA, hjB) => ({
+      ok: a !== null && b !== null && (a + b) / 2 >= 3.5 && b >= 4,
+      text: `Sprachniveau B1 ${wo}: Mittel aus ${hjA} und ${hjB} mindestens 3,5 und ${hjB} mindestens 4 Punkte (aktuell ${txt(a)} und ${txt(b)})`,
+    });
+    const hjPunkte = (f, hj) => halbjahr(f, hj).punkte;
+    switch (fs.modus) {
+      case 'jgst13':
+        if (!fsFach) return [{ ok: false, text: 'Fach der zweiten Fremdsprache (Wahlpflichtfach in der 13.) ausgewählt: zwingend erforderlich' }];
+        return [mittelUndLetztes(`in ${fsFach.name || 'der 2. Fremdsprache'}`, hjPunkte(fsFach, '13_1'), hjPunkte(fsFach, '13_2'), '13/1', '13/2')];
+      case 'pf2iw':
+        if (richtung && richtung !== 'intwirtschaft') return [{ ok: false, text: 'Französisch/Spanisch als Profilfach 2 gibt es nur in der Ausbildungsrichtung Internationale Wirtschaft' }];
+        if (!fsFach) return [{ ok: false, text: 'Profilfach 2 Französisch/Spanisch (13. Klasse) vorhanden' }];
+        return [mittelUndLetztes(`in ${fsFach.name || 'Profilfach 2'}`, hjPunkte(fsFach, '13_1'), hjPunkte(fsFach, '13_2'), '13/1', '13/2')];
+      case 'wpf12':
+        return [mittelUndLetztes('(2. Fremdsprache in der 12.)', zahl(fs.hj1), zahl(fs.hj2), '12/1', '12/2')];
+      case 'ergaenzung': {
+        const p = zahl(fs.pruefung);
+        return [{ ok: p !== null && p >= 4, text: `Sprachniveau B1 durch die Ergänzungsprüfung: mindestens 4 Punkte (aktuell ${txt(p)})` }];
+      }
+      default:
+        return [];
+    }
+  }
+
   /**
    * Gesamtauswertung. art: 'fachabi' (Anlage 4 Nr. 1) oder 'abitur' (Anlage 4 Nr. 3).
    * Ergebnis: E, M (erfasster Teil), Mgesamt, S (Hochrechnung bzw. Endergebnis), Einbringung, Bestehen.
+   *
+   * Abitur: Fachgebundene (FHR) und allgemeine Hochschulreife (AHR) werden getrennt gerechnet
+   * (wie das Streichvorschlag-Tool der FOS, Jgst. 13). Abwärtskompatibel ist das Ergebnis selbst
+   * das AHR-Ergebnis, wenn ein Nachweis der 2. Fremdsprache gewählt ist, sonst das FHR-Ergebnis.
+   * Zusätzlich: fhr (Teilergebnis), ahr (Teilergebnis oder null), ahrBedingungen ([{ ok, text }]),
+   * abschluss ('ahr' | 'fhr': welches Teilergebnis oben steht).
    */
   function auswertung(state, art = 'fachabi') {
+    if (art !== 'abitur') return rechnen(state, art, {});
+    const fs = zweiteFSVon(state);
+    const fhr = rechnen(state, art, { variante: 'fhr', fs });
+    let ahr = null;
+    let ahrBedingungen;
+    if (fs.modus === 'keine') {
+      ahrBedingungen = [{ ok: false, text: 'Kein Nachweis der zweiten Fremdsprache ausgewählt' }];
+    } else if (fs.modus === 'b1') {
+      // Sprachniveau B1 anderweitig nachgewiesen: AHR = FHR (keine Zusatzpunkte, M 390)
+      ahrBedingungen = [{ ok: true, text: 'Sprachniveau B1 anderweitig nachgewiesen: allgemeine Hochschulreife mit bestandener fachgebundener' }];
+      ahr = { ...fhr, variante: 'ahr', ahrBedingungen, bestehen: fhr.bestehen.concat(ahrBedingungen) };
+    } else {
+      ahr = rechnen(state, art, { variante: 'ahr', fs });
+      ahrBedingungen = ahr.ahrBedingungen;
+    }
+    return { ...(ahr || fhr), fhr, ahr, ahrBedingungen, abschluss: ahr ? 'ahr' : 'fhr' };
+  }
+
+  /**
+   * Eine Auswertung. Fachabi: opt = {}. Abitur: opt.variante 'fhr' (2. Fremdsprache zählt nicht)
+   * oder 'ahr' (mit Nachweis opt.fs), siehe auswertung.
+   */
+  function rechnen(state, art, opt) {
     const abi = art === 'abitur';
     const faecher = state.faecher || [];
     const warnungen = [];
@@ -589,11 +703,18 @@ const Calc = (function () {
     const anzahlHj = abi ? 16 : 25;
     const slotsVon = abi ? einbringbareHalbjahreAbitur : einbringbareHalbjahre;
 
-    // Zweite Fremdsprache beim Abitur (§ 35 Abs. 7, § 38 Abs. 2)
-    const fs = (abi && state.zweiteFS) || { modus: 'keine' };
-    const fsPflicht = fs.modus === 'jgst13' && fs.fachId ? (f, hj) => f.id === fs.fachId && hj.startsWith('13') : null;
+    // Zweite Fremdsprache beim Abitur (§ 35 Abs. 7, § 38 Abs. 2): nur in der AHR-Variante.
+    // Die FHR rechnet immer mit M = 390 und ohne die Punkte der 2. Fremdsprache.
+    const variante = abi ? opt.variante || 'fhr' : null;
+    const ahr = variante === 'ahr';
+    const fs = ahr ? opt.fs : { modus: 'keine' };
+    // Fach, dessen 13/1 und 13/2 in der AHR eingebracht werden müssen (nicht streichbar)
+    let fsFach = null;
+    if (ahr && fs.modus === 'jgst13') fsFach = faecher.find((f) => fs.fachId && f.id === fs.fachId && slotsVon(f).length) || null;
+    if (ahr && fs.modus === 'pf2iw') fsFach = profilfach2IW(faecher);
+    const fsPflicht = fsFach ? (f, hj) => f.id === fsFach.id && hj.startsWith('13') : null;
     let Mgesamt = abi ? M_ABITUR : M_GESAMT;
-    if (abi && (fs.modus === 'wpf12' || fs.modus === 'ergaenzung')) Mgesamt = 420;
+    if (ahr && (fs.modus === 'wpf12' || fs.modus === 'ergaenzung')) Mgesamt = M_ABITUR_FS;
     const min1 = Math.round(Mgesamt / 3);
     const min2 = Math.round(Mgesamt * 0.4);
 
@@ -632,6 +753,7 @@ const Calc = (function () {
       seminar = seminarErgebnis(state.seminar);
       if (seminar.punkte !== null) { Erest += 2 * seminar.punkte; M += 30; } else restMax += 30;
       if (seminar.null0) warnungen.push('Eine Seminarleistung hat 0 Punkte: Das Seminar ist dann nicht bestanden (§ 17 Abs. 2).');
+      // fs.modus ist in der FHR immer 'keine'
       if (fs.modus === 'wpf12') {
         const werte = [zahl(fs.hj1), zahl(fs.hj2)];
         zweiteFS = { punkte: werte };
@@ -644,7 +766,10 @@ const Calc = (function () {
     }
 
     // Einbringung und Streichvorschlag
-    const extraGE = fpaGesamt === null ? [] : [fpaGesamt];
+    // Unterpunktungen außerhalb der Fächer: Fachabi die fpA-Gesamtnote, Abitur das Seminar.
+    // Seminar: wie Streichvorschlag-Tool Jgst. 13; ob das Seminar als Fach zählt, ist in der
+    // Verordnung nicht eindeutig. Es zählt auch in der Rettungs- und Sperrlogik (bewerten).
+    const extraGE = abi ? (seminar.punkte === null ? [] : [seminar.punkte]) : fpaGesamt === null ? [] : [fpaGesamt];
     const geRegel = (E, u) => u === 0 || (u === 1 && E >= min1) || (u === 2 && E >= min2);
     const modus = streichModusVon(state, art);
     const aus = modus === 'aus';
@@ -655,7 +780,7 @@ const Calc = (function () {
       ohneStreichen: aus,
       manuell: aus ? null : auswahlListe((state.gestrichen || {})[art]),
       behalten: (state.behalten && state.behalten[art]) || {},
-      rang: toolRang(faecher, state.richtung),
+      rang: toolRang(faecher, state.richtung, art),
       bewerten: (eHjl, ge) => {
         const E = Erest + eHjl;
         const u = zaehleUnter4(ge.concat(extraGE));
@@ -713,15 +838,18 @@ const Calc = (function () {
     if (englischMuendlichFehlt) hinweise.push('Die mündliche Prüfung (Gruppenprüfung) in Englisch fehlt noch.');
     if (!abi && fpa.some((r) => r.punkte === null)) hinweise.push('Für die fachpraktische Ausbildung fehlt noch ein Halbjahresergebnis.');
     if (abi && seminar.punkte === null) hinweise.push('Das Seminarergebnis fehlt noch.');
+    if (fs.modus === 'wpf12' && zweiteFS.punkte.some((w) => w === null)) hinweise.push('Für die zweite Fremdsprache fehlen noch die Halbjahresleistungen 12/1 und 12/2.');
+    if (fs.modus === 'ergaenzung' && zweiteFS.punkte[0] === null) hinweise.push('Das Ergebnis der Ergänzungsprüfung in der zweiten Fremdsprache fehlt noch.');
 
     // Bestehen
     const pruefWerte = pruefungen.map((p) => p.punkte);
     const geWerte = gesamtergebnisse.map((g) => g.punkte).concat(extraGE);
     const geUnter4 = zaehleUnter4(geWerte);
+    // Mündliche Prüfung Englisch: Pflicht für Fachabi und Abitur (wie im Streichvorschlag-Tool der FOS, Jgst. 12 und 13)
     const vollstaendig =
       ein.slotsOffen === 0 && ein.slotsGesamt >= anzahlHj && (aus ? eingebracht.length > 0 : eingebracht.length === anzahlHj) &&
-      pruefungsfaecher.length === 4 && pruefungen.every((p) => p.punkte !== null) &&
-      (abi ? seminar.punkte !== null && (!zweiteFS || zweiteFS.punkte.every((w) => w !== null)) : fpa.every((r) => r.punkte !== null) && !englischMuendlichFehlt);
+      pruefungsfaecher.length === 4 && pruefungen.every((p) => p.punkte !== null) && !englischMuendlichFehlt &&
+      (abi ? seminar.punkte !== null && (!zweiteFS || zweiteFS.punkte.every((w) => w !== null)) : fpa.every((r) => r.punkte !== null));
 
     const bestehen = [];
     if (ein.kAnzahl > 0) bestehen.push({ ok: ein.kOffen === 0, text: `Jedes Halbjahr ohne Note (k) ${aus ? 'lässt sich streichen' : 'wird gestrichen'} (${ein.kAnzahl - ein.kOffen} von ${ein.kAnzahl})` });
@@ -734,11 +862,15 @@ const Calc = (function () {
       const pruefUnter4 = zaehleUnter4(pruefWerte);
       bestehen.push({ ok: pruefUnter4 <= 2, text: `Höchstens 2 Prüfungsergebnisse unter 4 Punkten (aktuell ${pruefUnter4}, 0 Punkte zählen doppelt)` });
     }
-    bestehen.push({ ok: geUnter4 <= 2, text: `Höchstens 2 Gesamtergebnisse unter 4 Punkten${abi ? '' : ', fpA eingeschlossen'} (aktuell ${geUnter4}, 0 Punkte zählen doppelt)` });
+    bestehen.push({ ok: geUnter4 <= 2, text: `Höchstens 2 Gesamtergebnisse unter 4 Punkten${abi ? ', Seminar eingeschlossen' : ', fpA eingeschlossen'} (aktuell ${geUnter4}, 0 Punkte zählen doppelt)` });
     if (geUnter4 === 1) bestehen.push({ ok: E >= min1, text: `Bei einem Gesamtergebnis unter 4 Punkten mindestens ${min1} Punkte (aktuell ${punkteText(E)})` });
     if (geUnter4 === 2) bestehen.push({ ok: E >= min2, text: `Bei zwei Gesamtergebnissen unter 4 Punkten mindestens ${min2} Punkte (aktuell ${punkteText(E)})` });
     if (!abi && fpa.some((r) => r.null0)) bestehen.push({ ok: false, text: 'Fachpraktische Ausbildung bestanden' });
-    if (abi && seminar.null0) bestehen.push({ ok: false, text: 'Seminar bestanden' });
+    // Seminar mit 0 Punkten (auch als Zeugniswert): nicht bestanden (wie im Streichvorschlag-Tool der FOS, Jgst. 13)
+    if (abi && seminar.punkte === 0) bestehen.push({ ok: false, text: 'Seminar bestanden (nicht mit 0 Punkten)' });
+    // AHR: Nachweis der 2. Fremdsprache (Sprachniveau B1)
+    const ahrBedingungen = ahr ? ahrBedingungenVon(fs, fsFach, state.richtung) : [];
+    bestehen.push(...ahrBedingungen);
 
     // Gesamturteil: k-Problem schlägt alles, dann unvollständig, dann die Regeln
     let ergebnis;
@@ -793,6 +925,8 @@ const Calc = (function () {
       bestehen,
       hinweise,
       warnungen,
+      // Nur Abitur: 'fhr' | 'ahr', Bedingungen der AHR, Fach mit Pflicht-Halbjahren (2. Fremdsprache)
+      ...(abi ? { variante, ahrBedingungen, fsFachId: fsFach ? fsFach.id : null } : {}),
     };
   }
 
@@ -932,7 +1066,7 @@ const Calc = (function () {
   }
 
   return {
-    HJ, HJ_LABEL, M_GESAMT, M_ABITUR,
+    HJ, HJ_LABEL, M_GESAMT, M_ABITUR, M_ABITUR_FS, FS_MODI, zweiteFSVon,
     rundePunkte, runde2, gesamtergebnisRunden, toolRang, gesamtergebnis, istKeineNote, durchschnitt, notenstufe, noteAusPunkten, stufeAusPunkten, gewichteterSchnitt,
     halbjahr, halbjahreDesFachs, einbringbareHalbjahre, einbringbareHalbjahreAbitur,
     pruefungsergebnis, fpaHalbjahr, seminarErgebnis,
