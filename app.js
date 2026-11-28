@@ -137,17 +137,65 @@
   }
 
   let state = laden();
-  const ui = { tab: 'faecher', fachId: null, zielHJ: {}, statHJ: 'alle', abschluss: null, hjAnsicht: null };
+  // archiv: { id, name } solange ein Archiv angezeigt wird (nur ansehen), sonst null
+  const ui = { tab: 'faecher', fachId: null, zielHJ: {}, statHJ: 'alle', abschluss: null, hjAnsicht: null, archiv: null };
+  let archivVorher = null; // aktueller Stand, solange ein Archiv angezeigt wird
+  const archivAnsicht = () => !!ui.archiv;
+  const NUR_LESEN = 'Im Archiv kann man nichts ändern';
 
   function speichern() {
+    if (archivAnsicht()) return; // Archiv ansehen: nie in den normalen Speicher schreiben
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignorieren */ }
   }
 
   function aendern(fn) {
+    if (archivAnsicht()) { toast(NUR_LESEN); render(); return; }
     fn();
     speichern();
     render();
   }
+
+  // ---------- Archiv (alte Schuljahre) ----------
+  // Liste [{ id, name, datum (ISO), stand }]; stand ist eine vollständige Kopie des App-Zustands
+  const ARCHIV_KEY = 'fachabitur-rechner-archiv-v1';
+  const kopie = (x) => JSON.parse(JSON.stringify(x));
+  const archivGueltig = (a) => !!(a && a.id && a.stand && a.stand.version === 2 && Array.isArray(a.stand.faecher));
+  // Stand aus Archiv oder Sicherung: ohne Feld „archiv“, alte Stände wie beim Laden normalisieren
+  function standAus(d) {
+    const { archiv, ...rest } = d;
+    return normalisieren(rest);
+  }
+
+  function archivLaden() {
+    try {
+      const raw = localStorage.getItem(ARCHIV_KEY);
+      const d = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(d)) return d.filter(archivGueltig);
+    } catch (e) { /* kein Speicher verfügbar */ }
+    return [];
+  }
+
+  function archivSpeichern(liste) {
+    try { localStorage.setItem(ARCHIV_KEY, JSON.stringify(liste)); return true; } catch (e) { return false; }
+  }
+
+  /** Kopie von stand ins Archiv legen. Gibt den Eintrag zurück oder null, wenn der Speicher voll ist. */
+  function archivAnlegen(name, stand) {
+    const liste = archivLaden();
+    const { archiv, ...rest } = kopie(stand);
+    const eintrag = { id: `a-${Presets.neueId()}`, name: String(name || '').trim() || 'Schuljahr', datum: new Date().toISOString(), stand: rest };
+    liste.push(eintrag);
+    return archivSpeichern(liste) ? eintrag : null;
+  }
+
+  const archivSortiert = () => archivLaden().sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')));
+  const archivDatum = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); };
+  // Schuljahr ab August, z. B. 2025 => „2025/26“
+  const schuljahrText = (jahr) => `${jahr}/${String((jahr + 1) % 100).padStart(2, '0')}`;
+  // Beim Wechsel ins neue Schuljahr das Schuljahr, das gerade zu Ende ist: bis Juli das laufende, ab August das vorige.
+  // Beides beginnt im Vorjahr, z. B. Juli 2026 und September 2026 => „2025/26“.
+  const altesSchuljahr = (datum = new Date()) => schuljahrText(datum.getFullYear() - 1);
+  const laufendesSchuljahr = (datum = new Date()) => schuljahrText(Presets.schuljahr(datum));
 
   const fachById = (id) => state.faecher.find((f) => f.id === id);
   const hat13 = () => state.klasse === '13' || state.faecher.some((f) => f.jahrgaenge && f.jahrgaenge[13]);
@@ -185,7 +233,7 @@
   }
 
   function themeAnwenden() {
-    const t = state.einstellungen.theme;
+    const t = (archivVorher || state).einstellungen.theme; // im Archiv das Design des aktuellen Stands
     if (t === 'hell') document.documentElement.dataset.theme = 'light';
     else if (t === 'dunkel') document.documentElement.dataset.theme = 'dark';
     else delete document.documentElement.dataset.theme;
@@ -1306,7 +1354,44 @@
       </section>`;
   }
 
+  /** Karte „Schuljahre“: neues Schuljahr beginnen, Archiv ansehen, wiederherstellen, löschen. */
+  function karteSchuljahre() {
+    const liste = archivSortiert();
+    const abschlussText = (st) => (WAHL.find(([k]) => k === st.abschluss) || [null, ''])[1];
+    const zeilen = liste.map((a) => `
+      <div class="archiv-zeile">
+        <span class="verwalt-text"><span class="fach-name">${esc(a.name)}</span><span class="fach-sub">${[abschlussText(a.stand), archivDatum(a.datum) ? `gesichert am ${archivDatum(a.datum)}` : ''].filter(Boolean).map(esc).join(' · ')}</span></span>
+        <div class="archiv-knoepfe">
+          <button class="mini-btn text" data-action="archiv-ansehen" data-id="${esc(a.id)}">Ansehen</button>
+          <button class="mini-btn text" data-action="archiv-wiederherstellen" data-id="${esc(a.id)}">Wiederherstellen</button>
+          <button class="mini-btn text gefahr" data-action="archiv-loeschen" data-id="${esc(a.id)}" data-confirm="Archiv wirklich löschen? Das kann man nicht rückgängig machen.">Löschen</button>
+        </div>
+      </div>`).join('');
+    const bereit = eingerichtet() && !!state.abschluss;
+    return `
+      <section class="card">
+        <h3>Schuljahre <span class="zahl">${liste.length} im Archiv</span></h3>
+        <p class="hinweis">Neues Schuljahr? Deine Noten kommen ins Archiv. Dort kannst du sie jederzeit ansehen.</p>
+        ${bereit ? `<div class="btn-reihe">
+          <button class="btn primaer breit" data-action="schuljahr-neu">Neues Schuljahr beginnen</button>
+          <button class="btn sekundaer breit" data-action="archivieren">Aktuelles Schuljahr archivieren</button>
+        </div>` : ''}
+        ${zeilen || '<p class="leer klein">Noch nichts im Archiv.</p>'}
+      </section>`;
+  }
+
+  /** Einstellungen, während ein Archiv angezeigt wird. */
+  function viewEinstellungenArchiv() {
+    return `
+      <section class="card">
+        <h3>Einstellungen</h3>
+        <p class="hinweis">Du siehst gerade ein Archiv. Im Archiv kann man nichts ändern. Geh zurück zum aktuellen Schuljahr, um etwas einzustellen.</p>
+        <button class="btn primaer breit" data-action="archiv-zurueck">Zurück zum aktuellen Schuljahr</button>
+      </section>`;
+  }
+
   function viewEinstellungen() {
+    if (archivAnsicht()) return viewEinstellungenArchiv();
     const e = state.einstellungen;
     const nm = notenModus();
     const gewichtFelder = NOTENARTEN.map((n) => `
@@ -1367,6 +1452,8 @@
         <p class="hinweis">Mit diesem Gewicht startet jede neue Note. Bei jeder Note kannst du es einzeln ändern, z. B. ×2 oder ×1,5. Gesetzlich (§ 21 FOBOSO) zählt jede Schulaufgabe so viel wie der Schnitt aller kleinen Noten zusammen (Gewicht 1).</p>
         ${gewichtFelder}
       </section>`}
+
+      ${karteSchuljahre()}
 
       <section class="card">
         <h3>Daten</h3>
@@ -1628,6 +1715,82 @@
       </form>`;
   }
 
+  // Neues Schuljahr: wählbare Klassen wie in „Abschluss und Klasse“
+  const schuljahrKlassen = () => (istRS() ? klassenBereich(5, 10) : notenModus() ? klassenBereich(1, 13) : ['11', '12', '13']);
+  // Realschule ab Klasse 7: Wahlpflichtfächergruppe nötig, falls noch keine gewählt ist
+  const brauchtGruppe = () => istRS() && (!state.gruppe || state.gruppe === 'keine');
+
+  function dialogSchuljahr() {
+    const klassen = schuljahrKlassen();
+    const vorschlag = String(Math.min(klasseNr() + 1, Number(klassen[klassen.length - 1])));
+    let hinweis = 'Im neuen Schuljahr startest du ohne Noten. Deine Fächer bleiben.';
+    if (!notenModus()) hinweis = 'Deine Noten aus der 11. und 12. bleiben erhalten, weil sie für das Fachabi bzw. Abitur zählen.';
+    else if (istRS() && klasseNr() === 10) hinweis += ' Nach der 10. Klasse auf die FOS? Dann tipp auf „Aktuelles Schuljahr archivieren“ und wechsle danach den Abschluss.';
+    return `
+      <form method="dialog" class="dialog-inhalt" data-form="schuljahr">
+        <h2>Neues Schuljahr beginnen</h2>
+        <p class="hinweis">Zuerst kommt eine Kopie deiner Noten ins Archiv. Dort kannst du sie weiter ansehen.</p>
+        <label class="feld">Name im Archiv<input type="text" id="sj-name" maxlength="60" value="${esc(`Klasse ${state.klasse} · ${altesSchuljahr()}`)}"></label>
+        <label class="feld">Neue Klasse
+          <select id="sj-klasse">${optionen(klassen.map((k) => [k, `${k}. Klasse`]), vorschlag)}</select>
+        </label>
+        ${brauchtGruppe() ? `<label class="feld" id="sj-gruppe-feld" ${Number(vorschlag) >= 7 ? '' : 'hidden'}>Wahlpflichtfächergruppe
+          <select id="sj-gruppe">${gruppenOptionen('', true)}</select>
+        </label>` : ''}
+        <p class="hinweis">${hinweis}</p>
+        <p class="fehler" id="sj-fehler" hidden></p>
+        <div class="btn-reihe ende">
+          <button type="button" class="btn sekundaer" data-action="dialog-zu">Abbrechen</button>
+          <button type="button" class="btn primaer" data-action="schuljahr-starten">Neues Schuljahr beginnen</button>
+        </div>
+      </form>`;
+  }
+
+  /** Aktiven Stand auf die neue Klasse umstellen (die Kopie liegt schon im Archiv). */
+  function neuesSchuljahrSetzen(klasse, gruppe) {
+    const k = String(klasse);
+    if (notenModus()) {
+      // Realschule, andere Schule: Fächer übernehmen, Noten, Zeugniswerte und Prüfungen leeren
+      if (istRS()) state.gruppe = gruppe;
+      const faecher = istRS() ? Realschule.klasseErgaenzen(state.faecher, state.gruppe, k) : Realschule.klasseUebernehmen(state.faecher, k);
+      const abKlasse = (jg) => Object.fromEntries(Object.entries(jg || {}).filter(([j, an]) => an && Number(j) >= Number(k)));
+      state.faecher = faecher.filter((f) => Realschule.unterrichtetIn(f, k)).map((f) => {
+        const neu = { ...f, jahrgaenge: abKlasse(f.jahrgaenge), noten: [], zeugnis: {} };
+        if (f.pruefung) neu.pruefung = { schriftlich: null, muendlich: null, praktisch: null };
+        return neu;
+      });
+    } else {
+      // FOS: Noten bleiben (Fachabi/Abitur zählen mehrere Jahrgänge), nur Klasse und Halbjahr umstellen
+      if (k === '13' && state.abschluss === 'fachabi') state.abschluss = 'abitur';
+      if (k === '13' && !state.faecher.some((f) => f.jahrgaenge && f.jahrgaenge[13])) state.faecher = Presets.dreizehnErgaenzen(state.faecher, state.richtung);
+    }
+    state.klasse = k;
+    state.aktivesHJ = `${k}_1`;
+  }
+
+  function uiZuruecksetzen(tab) {
+    ui.tab = tab;
+    ui.fachId = null;
+    ui.zielHJ = {};
+    ui.statHJ = 'alle';
+    ui.abschluss = null;
+    ui.hjAnsicht = null;
+  }
+
+  // Archiv ansehen: Bearbeiten-Knöpfe weglassen, Notenzeilen nicht antippbar, Eingabefelder deaktiviert
+  function nurLesen(html) {
+    return html
+      .replace(/<button[^>]*data-action="(?:fach-neu|note-neu|fach-einstellungen)"[^>]*>[^<]*<\/button>/g, '')
+      .replace(/<button class="noten-zeile" data-action="note-bearbeiten"[^>]*>([\s\S]*?)<\/button>/g, '<div class="noten-zeile">$1</div>')
+      .replace(/<(input|select)(?![^>]*data-bind="zielhj")([^>]*data-bind=[^>]*)>/g, '<$1$2 disabled>');
+  }
+
+  const archivBalken = () => `
+      <section class="archiv-balken" role="status">
+        <span>Archiv: <b>${esc(ui.archiv.name)}</b> – nur ansehen</span>
+        <button class="btn primaer" data-action="archiv-zurueck">Zurück zum aktuellen Schuljahr</button>
+      </section>`;
+
   function dialogOeffnen(html) {
     const d = $('#dialog');
     d.innerHTML = html;
@@ -1652,6 +1815,7 @@
     else if (ui.tab === 'statistik') { html = viewStatistik(); titel = 'Statistik'; }
     else if (ui.tab === 'einstellungen') { html = viewEinstellungen(); titel = 'Einstellungen'; }
     else html = viewFaecher();
+    if (archivAnsicht()) html = archivBalken() + nurLesen(html);
     $('#main').innerHTML = html;
     $('#titel').textContent = titel;
     $('#titel').style.borderLeftColor = fachFarbe || 'transparent';
@@ -1724,7 +1888,11 @@
       render();
       window.scrollTo(0, 0);
     },
-    hj(btn) { aendern(() => { state.aktivesHJ = btn.dataset.hj; }); },
+    hj(btn) {
+      // Im Archiv nur die Anzeige umschalten (die Kopie wird nicht gespeichert)
+      if (archivAnsicht()) { state.aktivesHJ = btn.dataset.hj; render(); return; }
+      aendern(() => { state.aktivesHJ = btn.dataset.hj; });
+    },
     abschluss(btn) { ui.abschluss = btn.dataset.art; render(); },
     'stat-hj'(btn) { ui.statHJ = btn.dataset.hj; render(); },
     'fach-oeffnen'(btn) { ui.fachId = btn.dataset.id; render(); window.scrollTo(0, 0); },
@@ -1952,8 +2120,77 @@
       });
       toast('Fächer der 13. Klasse ergänzt');
     },
+    'schuljahr-neu'() { dialogOeffnen(dialogSchuljahr()); },
+    'schuljahr-starten'() {
+      const fehler = (text) => { const p = $('#sj-fehler'); p.textContent = text; p.hidden = false; };
+      const name = $('#sj-name').value.trim();
+      const klasse = $('#sj-klasse').value;
+      if (!name) { fehler('Bitte gib dem Archiv einen Namen.'); return; }
+      let gruppe = state.gruppe;
+      if (brauchtGruppe() && Number(klasse) >= 7) {
+        gruppe = $('#sj-gruppe').value;
+        if (!gruppe) { fehler('Bitte wähle deine Wahlpflichtfächergruppe.'); return; }
+      }
+      // Erst archivieren; klappt das nicht (Speicher voll), bleibt alles, wie es ist
+      if (!archivAnlegen(name, state)) { fehler('Das Archiv konnte nicht gespeichert werden. Ist der Speicher voll?'); return; }
+      const fos = !notenModus();
+      ui.abschluss = null;
+      ui.zielHJ = {};
+      ui.statHJ = 'alle';
+      dialogSchliessen();
+      aendern(() => { neuesSchuljahrSetzen(klasse, gruppe); });
+      toast(fos ? `Neues Schuljahr: ${klasse}. Klasse. Deine Noten bleiben, eine Kopie ist im Archiv.` : `Neues Schuljahr: ${klasse}. Klasse. Die alten Noten sind im Archiv.`);
+    },
+    archivieren() {
+      const eintrag = archivAnlegen(`Klasse ${state.klasse} · ${laufendesSchuljahr()}`, state);
+      render();
+      toast(eintrag ? 'Kopie im Archiv gespeichert' : 'Das Archiv konnte nicht gespeichert werden. Ist der Speicher voll?');
+    },
+    'archiv-ansehen'(btn) {
+      const a = archivLaden().find((x) => x.id === btn.dataset.id);
+      if (!a) return;
+      dialogSchliessen();
+      archivVorher = state;
+      state = standAus(kopie(a.stand));
+      ui.archiv = { id: a.id, name: a.name };
+      uiZuruecksetzen('faecher');
+      render();
+      window.scrollTo(0, 0);
+    },
+    'archiv-zurueck'() {
+      if (!archivAnsicht()) return;
+      state = archivVorher;
+      archivVorher = null;
+      ui.archiv = null;
+      dialogSchliessen();
+      uiZuruecksetzen('einstellungen');
+      render();
+      window.scrollTo(0, 0);
+    },
+    'archiv-wiederherstellen'(btn) {
+      const a = archivLaden().find((x) => x.id === btn.dataset.id);
+      if (!a) return;
+      // Aktuellen Stand vorher sichern (nur, wenn schon etwas eingerichtet ist)
+      if ((state.abschluss || state.richtung) && !archivAnlegen(`Klasse ${state.klasse} · vor dem Wiederherstellen`, state)) {
+        toast('Das Archiv konnte nicht gespeichert werden. Ist der Speicher voll?');
+        return;
+      }
+      state = standAus(kopie(a.stand));
+      speichern();
+      uiZuruecksetzen('faecher');
+      render();
+      window.scrollTo(0, 0);
+      toast(`„${a.name}“ wiederhergestellt. Der vorige Stand ist im Archiv.`);
+    },
+    'archiv-loeschen'(btn) {
+      if (!bestaetigt(btn)) return;
+      archivSpeichern(archivLaden().filter((x) => x.id !== btn.dataset.id));
+      render();
+      toast('Archiv gelöscht');
+    },
     export() {
-      const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      const daten = { ...state, archiv: archivLaden() };
+      const blob = new Blob([JSON.stringify(daten, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${notenModus() ? 'noten' : 'fachabi-noten'}-${heute()}.json`;
@@ -1973,11 +2210,17 @@
     },
   };
 
+  const ARCHIV_ERLAUBT = new Set(['tab', 'hj', 'abschluss', 'stat-hj', 'fach-oeffnen', 'zurueck', 'dialog-zu', 'archiv-zurueck']);
+
   document.addEventListener('click', (ev) => {
     const btn = ev.target.closest('[data-action]');
     if (!btn || btn.disabled) return;
     const fn = aktionen[btn.dataset.action];
-    if (fn) { ev.preventDefault(); fn(btn); }
+    if (!fn) return;
+    ev.preventDefault();
+    // Archiv ansehen: nur Aktionen, die nichts ändern
+    if (archivAnsicht() && !ARCHIV_ERLAUBT.has(btn.dataset.action)) { toast(NUR_LESEN); return; }
+    fn(btn);
   });
 
   // Klick auf den Hintergrund schließt den Dialog
@@ -2048,10 +2291,13 @@
       return;
     }
     if (el.id === 'f-jg13') { const l = $('#f-pruef-abi').closest('label'); if (el.checked) l.hidden = false; return; }
+    if (el.id === 'sj-klasse') { const g = $('#sj-gruppe-feld'); if (g) g.hidden = Number(el.value) < 7; return; }
     if (el.id === 'import-datei') { importieren(el.files && el.files[0]); el.value = ''; return; }
 
     const bind = el.dataset.bind;
     if (!bind) return;
+    // Archiv ansehen: nur das Ziel („Was brauche ich?“) darf sich ändern, es wird nicht gespeichert
+    if (archivAnsicht() && bind !== 'zielhj') { toast(NUR_LESEN); render(); return; }
     const f = el.dataset.id ? fachById(el.dataset.id) : null;
     switch (bind) {
       case 'zielhj':
@@ -2182,11 +2428,26 @@
       try {
         const d = JSON.parse(leser.result);
         if (!d || d.version !== 2 || !Array.isArray(d.faecher)) throw new Error('Format');
-        state = normalisieren(d);
+        state = standAus(d);
         speichern();
+        // Archive aus der Sicherung übernehmen (alte Dateien haben keine), gleiche id nicht doppelt
+        let neu = 0;
+        let voll = false;
+        if (Array.isArray(d.archiv)) {
+          const liste = archivLaden();
+          const ids = new Set(liste.map((a) => a.id));
+          for (const a of d.archiv) {
+            if (!archivGueltig(a) || ids.has(String(a.id))) continue;
+            liste.push({ id: String(a.id), name: String(a.name || '').trim() || 'Schuljahr', datum: a.datum || new Date().toISOString(), stand: standAus(a.stand) });
+            ids.add(String(a.id));
+            neu++;
+          }
+          if (neu && !archivSpeichern(liste)) voll = true;
+        }
         ui.fachId = null;
         render();
-        toast('Sicherung geladen');
+        if (voll) toast('Sicherung geladen. Das Archiv passt nicht mehr in den Speicher.');
+        else toast(neu ? `Sicherung geladen, ${neu} ${neu === 1 ? 'Archiv' : 'Archive'} übernommen` : 'Sicherung geladen');
       } catch (e) {
         toast('Die Datei ist keine gültige Sicherung.');
       }

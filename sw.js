@@ -1,5 +1,5 @@
 // Offline-Cache. Antwortet sofort aus dem Cache und lädt im Hintergrund die neueste Version nach.
-const CACHE = 'fachabi-rechner-v11';
+const CACHE = 'fachabi-rechner-v12';
 const ASSETS = ['./', 'index.html', 'style.css', 'calc.js', 'presets.js', 'realschule.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

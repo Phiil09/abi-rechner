@@ -287,6 +287,19 @@ input.switch:checked::before { transform: translateX(20px); }
 .mini-btn.text { padding: 0 10px; font-weight: 600; font-size: 0.85rem; }
 .mini-btn:disabled { opacity: 0.3; cursor: default; }
 
+/* Schuljahre und Archiv */
+.archiv-zeile { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--border); }
+.archiv-zeile:first-of-type { border-top: none; }
+.archiv-knoepfe { display: flex; gap: 6px; flex-wrap: wrap; }
+.archiv-knoepfe .mini-btn { height: auto; min-height: 36px; padding: 4px 10px; }
+.mini-btn.gefahr { color: var(--danger); }
+.archiv-balken {
+  position: sticky; top: calc(56px + env(safe-area-inset-top)); z-index: 4;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  background: var(--warn-bg); color: var(--warn-text); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); font-weight: 600;
+}
+.archiv-balken .btn { padding: 8px 12px; font-size: 0.9rem; }
+
 /* Willkommen */
 .willkommen { text-align: center; }
 .willkommen .feld { text-align: left; }
