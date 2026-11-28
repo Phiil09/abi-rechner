@@ -163,6 +163,8 @@
     if (f.jahrgaenge[13]) { f.zeugnis['13_1'] = 11; f.zeugnis['13_2'] = 11; }
   }
   fa.filter((f) => f.pruefungsfachAbi).forEach((f, i) => { f.pruefungAbi = { schriftlich: pruefWerte[i] }; });
+  // Mündliche Prüfung Englisch ist auch beim Abitur Pflicht (wie im Streichvorschlag-Tool der FOS, Jgst. 13): (2*10 + 10)/3 = 10, E bleibt gleich
+  fa.find((f) => f.name === 'Englisch').pruefungAbi.muendlich = 10;
   const stAbi = { faecher: fa, seminar: { phase: 10, arbeit: 12, gespraech: 11 } };
   const ra = C.abitur(ein(stAbi, 'abitur'));
   // E = 2*38 + 2*11 + 16*11 = 76 + 22 + 176 = 274; S = 5,667 - 5*274/390 = 2,154 -> 2,1
@@ -747,6 +749,228 @@
   // Vollständig: wie bisher
   rAbi = C.abitur(ein(stJ, 'abitur'));
   eq('Abitur voll: Vorschläge', [rAbi.komplett, C.streichAufschluesselung(rAbi), rAbi.E], [true, '(2 Vorschläge der App)', 274]);
+
+  // ===== Abitur (Jgst. 13) wie das Streichvorschlag-Tool der FOS (Jgst. 13) =====
+
+  // Eigene Fächer nur in der 13.: 4 Prüfungsfächer + F5..F8 = 16 Halbjahre (keine Streichung),
+  // mit F9 18 Halbjahre (2 Streichungen). Standard: alle HJ 4, Prüfungen 4 (Englisch 4/4), Seminar 4.
+  // Grund-E = 2 × (4 + 4 + 4 + 4) + 2 × 4 + 16 × 4 = 32 + 8 + 64 = 104
+  function abiEigene(werte = {}, opt = {}) {
+    const f = (name, hj, apE) => ({ id: name, name, jahrgaenge: { 13: true }, einbringbar: true, pruefungsfachAbi: !!apE, pruefungAbi: apE || {}, zeugnis: { '13_1': hj[0], '13_2': hj[1] }, noten: [] });
+    const w = (n) => werte[n] || [4, 4];
+    const apW = opt.ap || [4, 4, 4, 4];
+    const fx = [
+      f('Deutsch', w('Deutsch'), { schriftlich: apW[0] }),
+      f('Englisch', w('Englisch'), { schriftlich: apW[1], muendlich: opt.englischM === undefined ? apW[1] : opt.englischM }),
+      f('Mathematik', w('Mathematik'), { schriftlich: apW[2] }),
+      f('Physik', w('Physik'), { schriftlich: apW[3] }),
+    ];
+    for (let i = 5; i <= (opt.mitF9 ? 9 : 8); i++) fx.push(f(`F${i}`, w(`F${i}`)));
+    if (opt.extra) fx.push(...opt.extra);
+    return { faecher: fx, seminar: { ergebnis: opt.seminar === undefined ? 4 : opt.seminar }, zweiteFS: opt.fs || { modus: 'keine' }, richtung: opt.richtung, streichModus: { abitur: 'ein' } };
+  }
+  const abiR = (werte, opt) => C.abitur(abiEigene(werte, opt));
+  const alle = (w) => ({ Deutsch: [w, w], Englisch: [w, w], Mathematik: [w, w], Physik: [w, w], F5: [w, w], F6: [w, w], F7: [w, w], F8: [w, w], F9: [w, w] });
+  const gestrichenAbi = (r) => r.kandidaten.filter((k) => k.gestrichen).map((k) => `${k.fachId} ${k.hj}`).sort();
+
+  // Grundfall
+  let rx = abiR();
+  eq('Abi eigene: E/M/S', [rx.E, rx.M, rx.zuStreichen, rx.geUnter4, rx.ergebnis], [104, 390, 0, 0, 'bestanden']);
+
+  // Seminar zählt bei den GE-Unterpunktungen mit (wie im Tool). Seminar 2 = 1 Unterpunktung, also E >= 130.
+  // HJ = 4 × 8 (Prüfungsfächer) + F5 30 + F6 16 + F7 8 + F8 8 = 94; E = 32 + 2 × 2 + 94 = 130 (= 390 / 3)
+  rx = abiR({ F5: [15, 15], F6: [12, 4] }, { seminar: 2 });
+  eq('Abi: Seminar 2 zählt als Unterpunktung, E 130', [rx.E, rx.geUnter4, rx.ergebnis], [130, 1, 'bestanden']);
+  // F6 11 statt 12: E = 129 < 130
+  rx = abiR({ F5: [15, 15], F6: [11, 4] }, { seminar: 2 });
+  eq('Abi: Seminar 2, E 129 => nicht bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [129, 1, 'nicht bestanden']);
+  eq('Abi: Schwellentext 130', rx.bestehen.some((b) => !b.ok && b.text.includes('mindestens 130 Punkte')), true);
+  // Seminar 4: keine Unterpunktung, E = 32 + 8 + 93 = 133 reicht
+  rx = abiR({ F5: [15, 15], F6: [11, 4] }, { seminar: 4 });
+  eq('Abi: Seminar 4 keine Unterpunktung', [rx.E, rx.geUnter4, rx.ergebnis], [133, 0, 'bestanden']);
+
+  // Seminar 0 (Zeugniswert): nicht bestanden, obwohl E reicht. Alle HJ und Prüfungen 10:
+  // E = 2 × 40 + 2 × 0 + 16 × 10 = 240 >= 156; Seminar 0 zählt doppelt (2 Unterpunktungen)
+  rx = abiR(alle(10), { ap: [10, 10, 10, 10], seminar: 0 });
+  eq('Abi: Seminar 0 => nicht bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [240, 2, 'nicht bestanden']);
+  eq('Abi: Seminar 0 Grund', rx.bestehen.filter((b) => !b.ok).map((b) => b.text), ['Seminar bestanden (nicht mit 0 Punkten)']);
+  // Seminar 0 aus einer Teilleistung 0 (§ 17 Abs. 2) ebenso
+  rx = C.abitur({ ...abiEigene(alle(10), { ap: [10, 10, 10, 10] }), seminar: { phase: 0, arbeit: 12, gespraech: 12 } });
+  eq('Abi: Seminar-Teilleistung 0 => nicht bestanden', [rx.seminar.punkte, rx.ergebnis], [0, 'nicht bestanden']);
+
+  // Mündliche Prüfung Englisch ist auch beim Abitur Pflicht (wie im Tool)
+  rx = abiR({}, { englischM: null });
+  eq('Abi: Englisch mündlich fehlt => unvollständig', [rx.vollstaendig, rx.ergebnis, rx.fhr.ergebnis, rx.E], [false, 'unvollständig', 'unvollständig', 104]);
+  eq('Abi: Englisch mündlich Hinweis', rx.hinweise.some((h) => h.includes('Englisch')), true);
+
+  // Ohne Nachweis der 2. FS: nur FHR; das Ergebnis selbst ist die FHR
+  rx = C.abitur(ein(stAbi, 'abitur'));
+  eq('Abi keine: nur FHR', [rx.abschluss, rx.ahr, rx.fhr.E, rx.E, rx.variante, rx.ahrBedingungen], ['fhr', null, 274, 274, 'fhr', [{ ok: false, text: 'Kein Nachweis der zweiten Fremdsprache ausgewählt' }]]);
+  eq('Abi unbekannter FS-Modus = keine', C.abitur(ein({ ...stAbi, zweiteFS: { modus: 'quatsch' } }, 'abitur')).abschluss, 'fhr');
+
+  // FHR ignoriert die 2. FS aus der 12., AHR zählt sie (M 420).
+  // FHR: E = 2 × 38 + 2 × 11 + 16 × 11 = 274, S = 17/3 − 5 × 274/390 = 5,6667 − 3,5128 = 2,1538 -> 2,1
+  // AHR mit 12/1 = 15, 12/2 = 15: E = 274 + 30 = 304, S = 17/3 − 5 × 304/420 = 5,6667 − 3,6190 = 2,0476 -> 2,0
+  rx = C.abitur(ein({ ...stAbi, zweiteFS: { modus: 'wpf12', hj1: 15, hj2: 15 } }, 'abitur'));
+  eq('FHR ignoriert wpf12 (M 390)', [rx.fhr.E, rx.fhr.M, rx.fhr.Mgesamt, rx.fhr.S, rx.fhr.zweiteFS, rx.fhr.ergebnis], [274, 390, 390, 2.1, null, 'bestanden']);
+  eq('AHR zählt wpf12 (M 420)', [rx.ahr.E, rx.ahr.M, rx.ahr.Mgesamt, rx.ahr.S, rx.ahr.ergebnis], [304, 420, 420, 2, 'bestanden']);
+  eq('wpf12: Ergebnis selbst = AHR', [rx.abschluss, rx.E, rx.S, rx.Mgesamt, rx.variante, rx.ahrBedingungen.map((b) => b.ok)], ['ahr', 304, 2, 420, 'ahr', [true]]);
+  // Ergänzungsprüfung 10: AHR E = 274 + 2 × 10 = 294 (M 420), FHR bleibt 274 (M 390)
+  eq('Ergänzung: FHR ohne, AHR mit', [ra2.fhr.E, ra2.fhr.Mgesamt, ra2.ahr.E, ra2.ahr.Mgesamt], [274, 390, 294, 420]);
+  // Streichmodus 'aus' gilt für beide: 18 HJ alle 11, Halbjahresteil 18 × 11 × 16/18 = 176
+  // FHR E = 76 + 22 + 176 = 274; AHR (wpf12 15/15) E = 274 + 30 = 304; beide vorläufig
+  rx = C.abitur({ ...stAbi, zweiteFS: { modus: 'wpf12', hj1: 15, hj2: 15 } });
+  eq('aus: FHR und AHR vorläufig', [rx.streichModus, rx.fhr.E, rx.fhr.ergebnis, rx.ahr.E, rx.ahr.ergebnis], ['aus', 274, 'vorläufig bestanden', 304, 'vorläufig bestanden']);
+  // Eigene Wahl gilt für beide; ein Pflicht-HJ der 2. FS zählt nur in der FHR als Streichung
+  rx = C.abitur(manuell(stFS, { [fid('Englisch')]: '13_1', [fid('Deutsch')]: '13_2' }, 'abitur'));
+  eq('ein: Wahl in FHR gültig, in AHR Pflicht', [rx.fhr.manuellAnzahl, rx.fhr.kandidaten.some((k) => k.gestrichen && k.fachId === fid('Englisch')), rx.ahr.manuellAnzahl, rx.manuellAnzahl], [2, true, 1, 1]);
+  // wpf12: beide Halbjahre sind Pflicht für „vollständig“ (nur AHR)
+  rx = C.abitur(ein({ ...stAbi, zweiteFS: { modus: 'wpf12', hj1: 15 } }, 'abitur'));
+  eq('wpf12: 12/2 fehlt => AHR unvollständig, FHR nicht', [rx.ergebnis, rx.fhr.ergebnis, rx.hinweise.some((h) => h.includes('12/1 und 12/2'))], ['unvollständig', 'bestanden', true]);
+
+  // AHR-Bedingungen (Sprachniveau B1), jeweils knapp drüber und knapp drunter
+  const ahrFall = (fs, st = stAbi) => {
+    const r = C.abitur(ein({ ...st, zweiteFS: fs }, 'abitur'));
+    return [r.ahrBedingungen.map((b) => b.ok), r.ahr.ergebnis, r.fhr.ergebnis];
+  };
+  // wpf12: Mittel >= 3,5 und 12/2 >= 4
+  eq('wpf12 3/4: Mittel 3,5, 12/2 = 4 => ok', ahrFall({ modus: 'wpf12', hj1: 3, hj2: 4 }), [[true], 'bestanden', 'bestanden']);
+  eq('wpf12 2/4: Mittel 3,0 => nein', ahrFall({ modus: 'wpf12', hj1: 2, hj2: 4 }), [[false], 'nicht bestanden', 'bestanden']);
+  eq('wpf12 4/3: 12/2 = 3 => nein', ahrFall({ modus: 'wpf12', hj1: 4, hj2: 3 }), [[false], 'nicht bestanden', 'bestanden']);
+  // Ergänzungsprüfung >= 4
+  eq('Ergänzung 4 => ok', ahrFall({ modus: 'ergaenzung', pruefung: 4 }), [[true], 'bestanden', 'bestanden']);
+  eq('Ergänzung 3 => nein', ahrFall({ modus: 'ergaenzung', pruefung: 3 }), [[false], 'nicht bestanden', 'bestanden']);
+  // jgst13: WPF der 13. als 2. Fremdsprache, Mittel 13/1 und 13/2 >= 3,5 und 13/2 >= 4
+  const wpf13 = fa.find((f) => f.name === 'Wahlpflichtfach (13. Klasse)');
+  const mitWpf13 = (a, b) => ({ ...stAbi, faecher: fa.map((f) => (f === wpf13 ? { ...f, zeugnis: { '13_1': a, '13_2': b } } : f)) });
+  const fsWpf = { modus: 'jgst13', fachId: wpf13.id };
+  eq('jgst13 3/4 => ok', ahrFall(fsWpf, mitWpf13(3, 4)), [[true], 'bestanden', 'bestanden']);
+  eq('jgst13 2/4 => nein', ahrFall(fsWpf, mitWpf13(2, 4)), [[false], 'nicht bestanden', 'bestanden']);
+  eq('jgst13 5/3 => nein', ahrFall(fsWpf, mitWpf13(5, 3)), [[false], 'nicht bestanden', 'bestanden']);
+  eq('jgst13 ohne Fach => AHR nicht bestanden', ahrFall({ modus: 'jgst13' }), [[false], 'nicht bestanden', 'bestanden']);
+  // jgst13 3/4: in der AHR zählen beide HJ des Fachs (Pflicht), die FHR darf die 3 streichen
+  // AHR: gestrichen 2 × 11 (Religion 13/1 und Gesch./PuG 13/1), E = 76 + 22 + 14 × 11 + 3 + 4 = 259
+  // FHR: gestrichen die 3 und Religion 13/1, E = 76 + 22 + 15 × 11 + 4 = 267
+  rx = C.abitur(ein({ ...mitWpf13(3, 4), zweiteFS: fsWpf }, 'abitur'));
+  eq('jgst13: Pflicht nur in der AHR', [rx.ahr.E, rx.fhr.E, rx.ahr.fsFachId === wpf13.id, rx.ahr.waehlbar[wpf13.id], rx.fhr.kandidaten.some((k) => k.gestrichen && k.fachId === wpf13.id)], [259, 267, true, [], true]);
+
+  // b1: Sprachniveau B1 anderweitig nachgewiesen => AHR = FHR (M 390, keine Punkte)
+  rx = C.abitur(ein({ ...stAbi, zweiteFS: { modus: 'b1' } }, 'abitur'));
+  eq('b1: AHR = FHR', [rx.abschluss, rx.ahr.E, rx.ahr.Mgesamt, rx.ahr.S, rx.ahr.ergebnis, rx.fhr.E, rx.fhr.ergebnis, rx.ahrBedingungen.map((b) => b.ok)], ['ahr', 274, 390, 2.1, 'bestanden', 274, 'bestanden', [true]]);
+  rx = C.abitur(ein({ ...stAbi, faecher: fa0, zweiteFS: { modus: 'b1' } }, 'abitur'));
+  eq('b1: FHR nicht bestanden => AHR auch nicht', [rx.fhr.ergebnis, rx.ahr.ergebnis, rx.ergebnis], ['nicht bestanden', 'nicht bestanden', 'nicht bestanden']);
+
+  // pf2iw (Internationale Wirtschaft): Französisch/Spanisch als Profilfach 2 ist in der AHR nicht streichbar.
+  // Alle HJ der 13. 11 Punkte, nur Französisch/Spanisch 13/1 = 5; Prüfungen 9/10/8/11, Englisch mündlich 10, Seminar 11.
+  // 9 Fächer in der 13. = 18 HJ, 2 Streichungen. Summe aller HJ = 17 × 11 + 5 = 192.
+  // FHR: streicht die 5 und Religion 13/1: E = 2 × 38 + 2 × 11 + (192 − 5 − 11) = 76 + 22 + 176 = 274, S 2,1
+  // AHR: Profilfach 2 Pflicht, streicht Religion 13/1 und Gesch./PuG 13/1: E = 76 + 22 + (192 − 22) = 268,
+  //      S = 17/3 − 5 × 268/390 = 5,6667 − 3,4359 = 2,2308 -> 2,2. Bedingung: Mittel (5 + 11)/2 = 8, 13/2 = 11 => ok
+  const iw = P.faecherFuer('intwirtschaft', 13, nov2026);
+  for (const f of iw) { f.zeugnis = {}; if (f.jahrgaenge[13]) { f.zeugnis['13_1'] = 11; f.zeugnis['13_2'] = 11; } }
+  iw.filter((f) => f.pruefungsfachAbi).forEach((f, i) => { f.pruefungAbi = { schriftlich: pruefWerte[i] }; });
+  iw.find((f) => f.name === 'Englisch').pruefungAbi.muendlich = 10;
+  const pf2 = iw.find((f) => f.name === 'Französisch/Spanisch');
+  pf2.zeugnis['13_1'] = 5;
+  const iwName = (r) => r.kandidaten.filter((k) => k.gestrichen).map((k) => iw.find((f) => f.id === k.fachId).name).sort();
+  const stIW = { faecher: iw, richtung: 'intwirtschaft', seminar: { ergebnis: 11 }, zweiteFS: { modus: 'pf2iw' }, streichModus: { abitur: 'ein' } };
+  rx = C.abitur(stIW);
+  eq('pf2iw: FHR streicht Profilfach 2', [iwName(rx.fhr), rx.fhr.E, rx.fhr.S], [['Französisch/Spanisch', 'Religionslehre/Ethik'], 274, 2.1]);
+  eq('pf2iw: AHR streicht Profilfach 2 nicht', [iwName(rx.ahr), rx.ahr.E, rx.ahr.Mgesamt, rx.ahr.S, rx.ahr.waehlbar[pf2.id], rx.ahr.fsFachId === pf2.id], [['Geschichte/Politik und Gesellschaft', 'Religionslehre/Ethik'], 268, 390, 2.2, [], true]);
+  eq('pf2iw: Bedingung und Ergebnis', [rx.ahrBedingungen.map((b) => b.ok), rx.ahr.ergebnis, rx.abschluss, rx.E], [[true], 'bestanden', 'ahr', 268]);
+  // Profilfach 2 mit 2/4 (Mittel 3,0) bzw. 5/3 (13/2 = 3): AHR nicht bestanden
+  const iwMit = (a, b) => ({ ...stIW, faecher: iw.map((f) => (f === pf2 ? { ...f, zeugnis: { '13_1': a, '13_2': b } } : f)) });
+  eq('pf2iw 3/4 => ok', C.abitur(iwMit(3, 4)).ahrBedingungen.map((b) => b.ok), [true]);
+  eq('pf2iw 2/4 => nein', [C.abitur(iwMit(2, 4)).ahrBedingungen.map((b) => b.ok), C.abitur(iwMit(2, 4)).ergebnis], [[false], 'nicht bestanden']);
+  eq('pf2iw 5/3 => nein', C.abitur(iwMit(5, 3)).ahrBedingungen.map((b) => b.ok), [false]);
+  eq('pf2iw in anderer Richtung => nein', C.abitur({ ...stAbi, richtung: 'technik', zweiteFS: { modus: 'pf2iw' } }).ahrBedingungen.map((b) => b.ok), [false]);
+
+  // Schwellen knapp, M 390 (FHR): 130 bei 1, 156 bei 2 Unterpunktungen
+  // 1 UP (F5 3/3): HJ = 4 × 8 + F5 6 + F6 30 + F7 14 + F8 8 = 90, E = 32 + 8 + 90 = 130
+  rx = abiR({ F5: [3, 3], F6: [15, 15], F7: [10, 4] });
+  eq('390: 1 UP, E 130 bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [130, 1, 'bestanden']);
+  rx = abiR({ F5: [3, 3], F6: [15, 15], F7: [9, 4] });
+  eq('390: 1 UP, E 129 nicht bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [129, 1, 'nicht bestanden']);
+  // 2 UP (F5, F6 3/3): HJ = D 20 + E 8 + M 8 + P 8 + 6 + 6 + F7 30 + F8 30 = 116, E = 32 + 8 + 116 = 156
+  rx = abiR({ F5: [3, 3], F6: [3, 3], F7: [15, 15], F8: [15, 15], Deutsch: [15, 5] });
+  eq('390: 2 UP, E 156 bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [156, 2, 'bestanden']);
+  rx = abiR({ F5: [3, 3], F6: [3, 3], F7: [15, 15], F8: [15, 15], Deutsch: [15, 4] });
+  eq('390: 2 UP, E 155 nicht bestanden', [rx.E, rx.geUnter4, rx.ergebnis], [155, 2, 'nicht bestanden']);
+  // M 420 (AHR mit Ergänzungsprüfung 4: + 2 × 4 = 8): 140 bei 1, 168 bei 2 Unterpunktungen.
+  // Die FHR derselben Daten rechnet ohne die 8 Punkte mit 130/156. (Im Tool hängen die FHR-Schwellen vom 2.-FS-Nachweis ab; bewusst nicht übernommen.)
+  const erg4 = { fs: { modus: 'ergaenzung', pruefung: 4 } };
+  // 1 UP: HJ = 32 + F5 6 + F6 30 + F7 16 + F8 8 = 92, FHR E = 32 + 8 + 92 = 132, AHR E = 140
+  rx = abiR({ F5: [3, 3], F6: [15, 15], F7: [12, 4] }, erg4);
+  eq('420: 1 UP, AHR 140 bestanden', [rx.ahr.E, rx.ahr.ergebnis, rx.fhr.E, rx.fhr.ergebnis], [140, 'bestanden', 132, 'bestanden']);
+  // F7 11/4: FHR E = 131 (>= 130 bestanden), AHR E = 139 (< 140 nicht bestanden)
+  rx = abiR({ F5: [3, 3], F6: [15, 15], F7: [11, 4] }, erg4);
+  eq('420: 1 UP, AHR 139 nicht bestanden, FHR 131 bestanden', [rx.ahr.E, rx.ahr.ergebnis, rx.fhr.E, rx.fhr.ergebnis, rx.ergebnis], [139, 'nicht bestanden', 131, 'bestanden', 'nicht bestanden']);
+  eq('420: Schwellentext 140', rx.ahr.bestehen.some((b) => !b.ok && b.text.includes('mindestens 140 Punkte')), true);
+  // 2 UP: HJ = D 20 + E 12 + M 8 + P 8 + 6 + 6 + 30 + 30 = 120, FHR E = 32 + 8 + 120 = 160, AHR E = 168
+  rx = abiR({ F5: [3, 3], F6: [3, 3], F7: [15, 15], F8: [15, 15], Deutsch: [15, 5], Englisch: [8, 4] }, erg4);
+  eq('420: 2 UP, AHR 168 bestanden', [rx.ahr.E, rx.ahr.geUnter4, rx.ahr.ergebnis, rx.fhr.E, rx.fhr.ergebnis], [168, 2, 'bestanden', 160, 'bestanden']);
+  // Englisch 7/4: FHR E = 159 (>= 156), AHR E = 167 (< 168)
+  rx = abiR({ F5: [3, 3], F6: [3, 3], F7: [15, 15], F8: [15, 15], Deutsch: [15, 5], Englisch: [7, 4] }, erg4);
+  eq('420: 2 UP, AHR 167 nicht bestanden, FHR 159 bestanden', [rx.ahr.E, rx.ahr.ergebnis, rx.fhr.E, rx.fhr.ergebnis], [167, 'nicht bestanden', 159, 'bestanden']);
+
+  // Nicht einbringbares WPF (Kunst) mit 2 Punkten zählt nie als Unterpunktung (im Tool zählt ein nicht einbringbares WPF 1 mit; bewusst nicht übernommen)
+  const kunst = (e) => ({ id: 'Kunst', name: 'Kunst', wpf: true, einbringbar: e, jahrgaenge: { 13: true }, zeugnis: { '13_1': 2, '13_2': 2 }, noten: [] });
+  rx = abiR({}, { extra: [kunst(false)] });
+  eq('Abi: Kunst 2 nicht einbringbar', [rx.E, rx.geUnter4, rx.zuStreichen, rx.ergebnis, rx.gesamtergebnisse.some((g) => g.fachId === 'Kunst')], [104, 0, 0, 'bestanden', false]);
+  // Zum Vergleich als einbringbares Fach: 18 HJ, 2 Streichungen (Kunst 13/1 und eine 4), Kunst-GE 2 bleibt.
+  // E = 32 + 8 + (64 + 4 − 2 − 4) = 102 < 130 bei 1 Unterpunktung
+  rx = abiR({}, { extra: [kunst(true)] });
+  eq('Abi: Kunst 2 einbringbar zählt', [rx.E, rx.geUnter4, rx.zuStreichen, rx.ergebnis], [102, 1, 2, 'nicht bestanden']);
+
+  // Rettung im Abitur: 18 HJ (mit F9), 2 Streichungen. Prüfungen 10 (Englisch 10/10), Prüfungsfächer-HJ 10/10, Seminar 10.
+  // F5 1/5 und F6 1/5 (GE 3, Streichen der 1 => 5), F7 2/2 (GE 2, nicht zu retten), F8 0/11 und F9 0/11 (GE 6).
+  // Summe aller HJ = 80 + 6 + 6 + 4 + 11 + 11 = 118
+  //  ohne Rettung (beide 0 gestrichen): E = 80 + 20 + 118 = 218, 3 Unterpunktungen => nicht bestanden
+  //  1 Rettung (F5 1 und F8 0):         E = 80 + 20 + 117 = 217, 2 Unterpunktungen, 217 >= 156 => bestanden
+  //  2 Rettungen (F5 1 und F6 1):       E = 216, 1 Unterpunktung, aber weniger Punkte
+  const rettWerte = { Deutsch: [10, 10], Englisch: [10, 10], Mathematik: [10, 10], Physik: [10, 10], F5: [1, 5], F6: [1, 5], F7: [2, 2], F8: [0, 11], F9: [0, 11] };
+  rx = abiR(rettWerte, { mitF9: true, ap: [10, 10, 10, 10], seminar: 10 });
+  eq('Abi Rettung: F5 gerettet, F8 0 gestrichen', [gestrichenAbi(rx), rx.E, rx.geUnter4, rx.ergebnis], [['F5 13_1', 'F8 13_1'], 217, 2, 'bestanden']);
+  // Seminar 3 zählt in der Rettungslogik mit: mit 1 Rettung 3 Unterpunktungen (F6, F7, Seminar),
+  // also 2 Rettungen: E = 80 + 2 × 3 + 116 = 202 >= 156, 2 Unterpunktungen (F7, Seminar) => bestanden
+  rx = abiR(rettWerte, { mitF9: true, ap: [10, 10, 10, 10], seminar: 3 });
+  eq('Abi Rettung mit Seminar 3: zwei Rettungen', [gestrichenAbi(rx), rx.E, rx.geUnter4, rx.ergebnis], [['F5 13_1', 'F6 13_1'], 202, 2, 'bestanden']);
+
+  // k im Abitur wie in der 12.: muss gestrichen werden, zählt dann weder in E noch in der Anzahl
+  // 18 HJ alle 4, F5 13/1 = k: gestrichen werden k und eine 4; E = 32 + 8 + 16 × 4 = 104
+  rx = abiR({ F5: ['k', 4] }, { mitF9: true });
+  eq('Abi k gestrichen', [rx.kandidaten.some((k) => k.k && k.gestrichen), rx.eingebrachtAnzahl, rx.E, rx.kOffen, rx.ergebnis], [true, 16, 104, 0, 'bestanden']);
+  // drei k, nur zwei Streichungen => nicht bestanden
+  rx = abiR({ F5: ['k', 4], F6: ['k', 4], F7: ['k', 4] }, { mitF9: true });
+  eq('Abi 3 k bei 2 Streichungen', [rx.kOffen, rx.ergebnis], [1, 'nicht bestanden']);
+  // k in der 2. FS (jgst13): in der AHR nicht streichbar => AHR nicht bestanden, FHR streicht es
+  rx = C.abitur(ein({ ...mitWpf13('k', 11), zweiteFS: fsWpf }, 'abitur'));
+  eq('Abi k in der 2. FS: nur AHR scheitert', [rx.fhr.kOffen, rx.fhr.ergebnis, rx.fhr.E, rx.ahr.kOffen, rx.ahr.ergebnis], [0, 'bestanden', 274, 1, 'nicht bestanden']);
+
+  // Zeilenreihenfolge des Tools in der 13.: Religion, Deutsch, Englisch, Gesch./PuG, Mathematik, PF1–3, WPF
+  const PF13 = {
+    technik: ['Physik', 'Technologie', 'Chemie'],
+    abu: ['Biologie', 'Chemie', 'Technologie'],
+    gesundheit: ['Gesundheitswissenschaften', 'Biologie', 'Kommunikation und Interaktion'],
+    gestaltung: ['Gestaltung', 'Medien', 'Naturwissenschaften'],
+    sozial: ['Pädagogik/Psychologie', 'Sozialwirtschaft und Recht', 'Biologie'],
+    wirtschaft: ['BwR (Betriebswirtschaftslehre mit Rechnungswesen)', 'Volkswirtschaftslehre', 'Naturwissenschaften'],
+    intwirtschaft: ['IBV (Internationale BWL und VWL)', 'Französisch/Spanisch', 'Naturwissenschaften'],
+  };
+  for (const key of Object.keys(PF13)) {
+    const fx = P.faecherFuer(key, 13, nov2026).filter((f) => f.jahrgaenge[13]);
+    const rang = C.toolRang(fx, key, 'abitur');
+    eq(`Tool-Rang 13 ${key}`, fx.slice().sort((a, b) => rang[a.id] - rang[b.id]).map((f) => f.name),
+      ['Religionslehre/Ethik', 'Deutsch', 'Englisch', 'Geschichte/Politik und Gesellschaft', 'Mathematik', ...PF13[key], 'Wahlpflichtfach (13. Klasse)']);
+    eq(`Presets 13 ${key}: Profilfächer in Tool-Reihenfolge`, fx.filter((f) => PF13[key].includes(f.name)).map((f) => f.name), PF13[key]);
+    eq(`Presets 13 ${key}: PF1 ist Abi-Prüfungsfach`, fx.filter((f) => f.pruefungsfachAbi).map((f) => f.name), ['Deutsch', 'Englisch', 'Mathematik', PF13[key][0]]);
+  }
+  // Die Liste der 12. bleibt (Gesundheit: Kommunikation und Interaktion vor Biologie)
+  eq('Presets 12 Gesundheit unverändert', P.faecherFuer('gesundheit', 12, nov2026).map((f) => f.name).slice(3, 7), ['Gesundheitswissenschaften', 'Chemie', 'Kommunikation und Interaktion', 'Biologie']);
+  // Ohne richtung: aus dem Abi-Prüfungsfach erkannt; Technik 13: Technologie vor Chemie (wie im Tool, Jgst. 13)
+  const fxT = P.faecherFuer('technik', 13, nov2026).filter((f) => f.jahrgaenge[13]);
+  const rangT = C.toolRang(fxT, null, 'abitur');
+  eq('Tool-Rang 13 ohne richtung', rangT[fxT.find((f) => f.name === 'Technologie').id] < rangT[fxT.find((f) => f.name === 'Chemie').id], true);
 
   log(`${ok} Tests bestanden, ${fail} fehlgeschlagen`);
   if (fail && isNode) process.exitCode = 1;
